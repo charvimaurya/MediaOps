@@ -1,0 +1,6 @@
+{
+  "name": "Ops Copilot",
+  "description": "A streaming and broadcast incident investigation prototype featuring autonomous AI root-cause analysis and live playback recovery simulation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
