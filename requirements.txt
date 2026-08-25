@@ -1,12 +1,4 @@
-fastapi==0.115.*
-uvicorn[standard]==0.32.*
-prometheus-client==0.21.*
-google-adk
-google-genai
-mcp
-httpx==0.27.*
-pydantic==2.*
-pydantic-settings==2.*
-numpy==2.*
-python-dotenv==1.*
-pytest==8.*
+prometheus-client
+fastapi
+uvicorn
+psutil
