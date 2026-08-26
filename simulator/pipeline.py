@@ -3,14 +3,15 @@ import signal
 import subprocess
 import threading
 import time
-import random
 
 import psutil
 from prometheus_client import start_http_server
 
 from simulator.failures import (
     healthy_state,
+    compute_telemetry_fields,
 )
+from simulator import backup as backup_module
 
 from simulator.telemetry import update_metrics
 
@@ -23,6 +24,14 @@ VIDEO_PATH = os.path.join(
     os.path.dirname(__file__),
     "video.mov",
 )
+
+# Real segmented output, for simulator/output_accounting.py's RPO
+# measurement to have genuine files to count (see that module's
+# docstring). Downscaled + bitrate-capped regardless of the source
+# video's own resolution -- this exists purely for accounting, not
+# playback quality.
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output", "primary")
+SEGMENT_DURATION_SECONDS = 2
 
 STREAM_NAME = "main_stream"
 ENCODER_NAME = "encoder_01"
@@ -56,6 +65,10 @@ def start_ffmpeg():
             f"Video not found: {VIDEO_PATH}"
         )
 
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    gop = 24 * SEGMENT_DURATION_SECONDS  # source is 24fps
+
     command = [
         "ffmpeg",
 
@@ -74,11 +87,23 @@ def start_ffmpeg():
         "-i",
         VIDEO_PATH,
 
-        # Don't generate an actual output file.
-        # We are using FFmpeg as the media-processing workload.
-        "-f",
-        "null",
-        "-",
+        # Real (but cheap) encode -- this is the actual media-processing
+        # workload, and also what simulator/output_accounting.py counts
+        # real segment files from.
+        "-vf", "scale=320:-2",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-b:v", "300k",
+        "-g", str(gop),
+        "-keyint_min", str(gop),
+        "-sc_threshold", "0",
+        "-an",
+
+        "-f", "hls",
+        "-hls_time", str(SEGMENT_DURATION_SECONDS),
+        "-hls_list_size", "0",
+        "-hls_segment_filename", os.path.join(OUTPUT_DIR, "segment_%05d.ts"),
+        os.path.join(OUTPUT_DIR, "playlist.m3u8"),
     ]
 
     print("\nStarting FFmpeg media pipeline...")
@@ -94,6 +119,29 @@ def start_ffmpeg():
         f"FFmpeg started with PID "
         f"{ffmpeg_process.pid}"
     )
+
+
+def restart_ffmpeg() -> bool:
+    """Stop the current ffmpeg process (if any) and start a fresh one.
+    Returns True once the new process is confirmed running. Used by
+    simulator/control.py's restart_encoder() -- kept as a small addition
+    here rather than duplicating process-management logic there."""
+
+    global ffmpeg_process
+
+    old = ffmpeg_process
+
+    if old is not None:
+        try:
+            old.terminate()
+            old.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            old.kill()
+
+    start_ffmpeg()
+    time.sleep(0.2)
+
+    return ffmpeg_process is not None and ffmpeg_process.poll() is None
 
 
 # ============================================================
@@ -160,66 +208,41 @@ def telemetry_loop():
             state = current_state
 
             # ------------------------------------------------
-            # Healthy pipeline
+            # Publish whichever encoder instance is currently active.
+            # compute_telemetry_fields() is the single source of truth
+            # for "what does this fault combination look like" -- see
+            # simulator/failures.py. Real psutil CPU/memory only apply
+            # when the active instance's own encoder layer is healthy
+            # (a network fault or an overloaded/dead encoder shouldn't
+            # borrow psutil's number for a different condition).
             # ------------------------------------------------
 
-            if state.failure_mode == "healthy":
-
-                real_cpu = get_real_cpu_usage()
-                real_memory = get_real_memory_usage()
-
-                # Keep CPU within sensible demo range
-                state.cpu_usage = max(
-                    0,
-                    min(100, real_cpu)
+            if state.active_output == "backup":
+                backup_instance = backup_module.get_backup()
+                fields = compute_telemetry_fields(
+                    encoder_fault=backup_instance.state.encoder_fault,
+                    network_fault=state.network_fault,
+                    bitrate_factor=state.bitrate_factor,
+                    real_cpu=backup_instance.baseline_cpu,
+                    real_memory=backup_instance.baseline_memory,
+                )
+            else:
+                if state.encoder_fault == "healthy":
+                    real_cpu = get_real_cpu_usage()
+                    real_memory = get_real_memory_usage()
+                else:
+                    real_cpu = None
+                    real_memory = None
+                fields = compute_telemetry_fields(
+                    encoder_fault=state.encoder_fault,
+                    network_fault=state.network_fault,
+                    bitrate_factor=state.bitrate_factor,
+                    real_cpu=real_cpu,
+                    real_memory=real_memory,
                 )
 
-                state.memory_usage = max(
-                    0,
-                    min(100, real_memory)
-                )
-
-                # Simulated media characteristics
-                state.fps = 30 + random.uniform(
-                    -0.3,
-                    0.3
-                )
-
-                state.bitrate = 5.2 + random.uniform(
-                    -0.1,
-                    0.1
-                )
-
-                state.encoding_latency = 42 + random.uniform(
-                    -4,
-                    4
-                )
-
-                state.dropped_frames = max(
-                    0,
-                    0.2 + random.uniform(
-                        -0.05,
-                        0.05
-                    )
-                )
-
-                state.packet_loss = max(
-                    0,
-                    0.1 + random.uniform(
-                        -0.02,
-                        0.02
-                    )
-                )
-
-                state.network_latency = max(
-                    0,
-                    30 + random.uniform(
-                        -3,
-                        3
-                    )
-                )
-
-                state.encoder_status = 1
+            for key, value in fields.items():
+                setattr(state, key, value)
 
             # ------------------------------------------------
             # Update Prometheus

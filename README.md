@@ -254,3 +254,174 @@ curl http://localhost:8001/state
 # recover
 curl -X POST http://localhost:8001/recovery/reset
 ```
+
+> **Note:** `pipeline.py` and `control_api.py` run as separate OS
+> processes, each with its own in-memory `current_state`. `/failure/*`
+> only mutates `control_api.py`'s own copy, so it does **not** currently
+> change what `pipeline.py` pushes to Prometheus. To see a failure
+> reflected in Prometheus/Grafana/the Incident Detector below, the state
+> flip needs to happen inside the same process that's running
+> `pipeline.py`'s telemetry loop -- this is a pre-existing limitation, not
+> something the Incident Detector changes.
+
+## Incident Detector
+
+`detector/` is a deterministic (no AI, no LLM) service that polls
+Prometheus for the metrics above, applies fixed threshold rules, and logs
+an `Incident` once a fault is confirmed over several consecutive samples.
+It creates incidents only -- no remediation, no auto-resolution.
+
+### 1. Start the stack
+
+```bash
+docker compose up -d                                  # Prometheus + Grafana
+python3 -m simulator.pipeline                          # media pipeline + /metrics on :8000
+uvicorn simulator.control_api:app --port 8001           # control API
+python3 -m detector.detector                            # incident detector
+```
+
+The detector polls `http://localhost:9090` (Prometheus) every 0.5s by
+default, and exposes its own two new metrics
+(`mediaops_incidents_total`, `mediaops_open_incidents`) on
+`http://localhost:8002/metrics`. Prometheus is not currently configured to
+scrape that port -- see the note in `detector/metrics.py` if you want to
+wire that up.
+
+### 2. Inject each failure
+
+Because of the cross-process caveat above, `/failure/*` on `control_api.py`
+won't currently show up in Prometheus. Until that's addressed, the most
+reliable way to see the detector react to a real failure is to flip
+`simulator.pipeline.current_state` from inside the same process running
+the telemetry loop (e.g. a short script that imports
+`simulator.pipeline`/`simulator.failures` and sets
+`pipeline.current_state = failures.encoder_overload()` directly, the way
+`pipeline.py`'s own `main()` runs). Once that path is fixed, the intended
+flow is simply:
+
+```bash
+curl -X POST http://localhost:8001/failure/encoder-overload
+curl -X POST http://localhost:8001/failure/network-degradation
+curl -X POST http://localhost:8001/failure/encoder-crash
+curl -X POST http://localhost:8001/recovery/reset
+```
+
+### 3. Expected log output and timing
+
+Detector logs go to stdout wherever you ran `python3 -m detector.detector`.
+
+```
+INCIDENT INC-001 encoder_overload HIGH cpu_usage=97.0 fps=18.0 encoding_latency=190.0 ...
+```
+
+Roughly how long after the underlying metric changes:
+- `encoder_failure`: as soon as the *next* poll sees it (1 breaching
+  sample is enough) -- within one Prometheus scrape (`scrape_interval: 5s`)
+  plus up to one detector poll (0.5s).
+- `network_degradation` / `encoder_overload`: 3 consecutive breaching
+  polls are required, so typically ~1.5s after Prometheus has picked up
+  the new value, on top of the same scrape delay.
+- If Prometheus can't be reached or a metric is briefly missing, you'll
+  see `WARNING Prometheus has no data for '<metric>'` lines -- the
+  detector keeps running and does not create an incident from partial data.
+- After 3 consecutive healthy samples, an open incident logs
+  `CANDIDATE_CLEAR ...` but stays `OPEN` (`resolved_at` stays `None`) --
+  closing incidents is a later phase.
+
+### 4. Reset detector state between demo runs
+
+The detector has no persistence -- restarting the process resets
+everything. To reset without restarting, call `force_clear()` on the
+`IncidentDetector` instance (there's no HTTP endpoint for it in this
+phase, since section J of this build explicitly excludes an API server).
+
+## Master Agent
+
+`agent/` is a deterministic state machine (no AI, no LLM) that receives
+each incident the detector creates and drives it through `DIAGNOSING →
+CONSULTING_KNOWLEDGE → DECIDING → GUARDRAIL_CHECK → ACTING → VERIFYING`,
+either reaching `RESOLVED` or escalating to `FAILED_SAFE`. Diagnosis is
+still a stub (`StubDiagnosisProvider`) behind the `DiagnosisProvider`
+interface a later phase replaces with Gemini. **Remediation is now
+real**: `RealActionExecutor` calls `simulator/control.py`'s
+`PipelineControl`, which mechanically mutates the simulator's actual
+fault-layer state (`encoder_fault` / `network_fault` / `bitrate_factor` /
+`active_output`) -- there is no "clear the fault flag" shortcut anywhere.
+A full guardrail engine (`agent/guardrails.py`) sits in front of every
+execution: allowed-actions per type, `MAX_ATTEMPTS`, a 10s per-action
+cooldown tracked globally across incidents, a system-wide in-flight lock,
+and a confidence floor that restricts low-confidence diagnoses to
+non-destructive actions only.
+
+Starting it is the same as above -- `python3 -m detector.detector` builds
+and wires a `MasterAgent` with `RealActionExecutor`.
+
+**Runs should now reach `RESOLVED`, not `FAILED_SAFE`** -- confirmed live
+against real Prometheus data and a real `ffmpeg` restart:
+
+```
+[MasterAgent] RECEIVED: incident INC-001 received
+[MasterAgent] DIAGNOSING: Encoder resource saturation (confidence 1.00)
+[MasterAgent] CONSULTING_KNOWLEDGE: 3 historical record(s), best action=restart_encoder
+[MasterAgent] DECIDING: chose restart_encoder (source=diagnosis, path=NORMAL)
+[MasterAgent] GUARDRAIL_CHECK: approved restart_encoder
+RealActionExecutor: restart_encoder succeeded in 0.33s -- encoder restarted in 0.33s
+[MasterAgent] ACTING: executed restart_encoder
+[MasterAgent] VERIFYING: PASSED
+[MasterAgent] RESOLVED: incident INC-001 resolved (RTO=6.35s)
+```
+
+A wrong-first-action run legitimately escalates -- if the diagnosis
+recommends something outside the incident type's allowed list (e.g.
+`restart_encoder` for `network_degradation`), the guardrail denies it
+*before it ever executes*, and the agent falls back to the correct
+permitted action instead:
+
+```
+DECIDING          Chose action='restart_encoder' via diagnosis on path=NORMAL
+GUARDRAIL_CHECK   DENIED [allowed_actions]: 'restart_encoder' is not permitted for network_degradation
+DECIDING          Chose action='reduce_bitrate' via policy on path=NORMAL
+GUARDRAIL_CHECK   Approved action='reduce_bitrate' (approved)
+ACTING            Executed 'reduce_bitrate': bitrate reduced to 0.50x nominal (was 1.00x)
+VERIFYING         Verification passed after 'reduce_bitrate'
+RESOLVED          Incident INC-E2E resolved
+```
+
+**Which action resolves which fault:**
+
+| Fault | Resolves it | Does NOT resolve it |
+|---|---|---|
+| `encoder_overload` | `restart_encoder`, `switch_backup` | `reduce_bitrate` alone (only partial relief -- `cpu_usage` stays pinned above the healthy threshold) |
+| `network_degradation` | `reduce_bitrate`, `switch_backup`* | `restart_encoder` (guardrail-denied -- not even in this type's allowed list) |
+| `encoder_failure` | `restart_encoder`, `switch_backup` | `reduce_bitrate` (not in this type's allowed list either) |
+
+\* `switch_backup` only helps `network_degradation` if the network fault
+is primary-specific; in this simulator `network_fault` is a shared
+condition, so in practice `reduce_bitrate` is what actually clears it.
+`failover` resolves all three -- it's the blunt, deliberately
+over-broad fail-safe.
+
+**Approximate timings**, dominated by Prometheus's own 5s scrape
+interval (`agent/verification.py`'s settle period is 6s specifically to
+guarantee at least one fresh scrape before checking):
+- Detection: ~2-6s after injection (one scrape + 3 consecutive detector polls at 0.5s each for `encoder_overload`/`network_degradation`; 1 poll for `encoder_failure`).
+- `restart_encoder` itself: under 2s (usually ~0.3s for a local-file ffmpeg restart).
+- Verification settle: 6s.
+- End-to-end RTO for a correct first action: typically 6-8s.
+
+Same cross-process caveat as the detector section above applies, with an
+extra wrinkle now: `RealActionExecutor`'s default `PipelineControl()`
+talks to *its own process's* `simulator.pipeline` module. For
+`restart_encoder` to control the real `ffmpeg` subprocess,
+`python3 -m detector.detector` needs to run in the **same process** as
+`pipeline.py`'s telemetry loop -- running them as the two separate
+terminals shown above means the agent's actions have no real ffmpeg
+process to act on. This is the same underlying limitation noted earlier
+in this README, now affecting remediation too, not just detection.
+
+The new Prometheus metrics (`mediaops_aht_seconds`, `mediaops_rto_seconds`,
+`mediaops_agent_actions_total`, `mediaops_escalation_path`,
+`mediaops_action_duration_seconds`, `mediaops_guardrail_denials_total`,
+`mediaops_active_encoder`) are exposed on the same
+`http://localhost:8002/metrics` as the detector's own metrics (not
+currently scraped by Prometheus, same reasoning as before).

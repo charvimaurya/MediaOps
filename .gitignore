@@ -6,3 +6,4 @@ __pycache__/
 .env
 simulator/*.mov
 simulator/*.mp4
+simulator/output/
