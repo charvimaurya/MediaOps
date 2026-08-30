@@ -96,6 +96,17 @@ class IncidentStatus(str, Enum):
     CLOSED = "CLOSED"
 
 
+# Statuses that mean the incident is over. Used by the Incident Recorder to
+# decide whether an existing incident is still "active" (one active incident
+# per problem). Authoritative domain knowledge -- lives with the enum.
+TERMINAL_STATUSES = frozenset({
+    IncidentStatus.RECOVERED,
+    IncidentStatus.FAILED,
+    IncidentStatus.ESCALATED,
+    IncidentStatus.CLOSED,
+})
+
+
 class RemediationAction(str, Enum):
     """
     The FIXED set of actions the Remediation Agent may choose from. It cannot
@@ -300,6 +311,10 @@ class Incident(StrictModel):
     incident_id: str = Field(default_factory=_new_id)
     status: IncidentStatus = IncidentStatus.DETECTED
     anomaly: AnomalyEvent
+    repeated_anomalies: list[AnomalyEvent] = Field(
+        default_factory=list,
+        description="Further AnomalyEvents seen for this same still-active incident (dedup path)",
+    )
 
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
