@@ -86,11 +86,14 @@ class IncidentStatus(str, Enum):
 
     DETECTED = "DETECTED"
     DIAGNOSING = "DIAGNOSING"
+    AGGREGATING = "AGGREGATING"
+    RETRIEVING = "RETRIEVING"
     DECIDING = "DECIDING"
     GATING = "GATING"
     EXECUTING = "EXECUTING"
     VERIFYING = "VERIFYING"
     RECOVERED = "RECOVERED"
+    RESOLVED = "RESOLVED"
     FAILED = "FAILED"
     ESCALATED = "ESCALATED"
     CLOSED = "CLOSED"
@@ -101,6 +104,7 @@ class IncidentStatus(str, Enum):
 # per problem). Authoritative domain knowledge -- lives with the enum.
 TERMINAL_STATUSES = frozenset({
     IncidentStatus.RECOVERED,
+    IncidentStatus.RESOLVED,
     IncidentStatus.FAILED,
     IncidentStatus.ESCALATED,
     IncidentStatus.CLOSED,

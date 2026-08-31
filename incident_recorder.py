@@ -100,6 +100,31 @@ class IncidentRecorder:
         logger.info("created incident %s for anomaly %s", incident.incident_id, event.event_id)
         return incident.incident_id
 
+    # -- load / save (the shared Firestore-incidents gateway) ------------- #
+
+    def load(self, incident_id: str) -> Incident:
+        """Read one incident back from Firestore. Raises KeyError if missing."""
+        snap = self._col.document(incident_id).get()
+        if not snap.exists:
+            raise KeyError(f"no incident {incident_id} in Firestore")
+        return Incident.model_validate(snap.to_dict())
+
+    def save(self, incident: Incident) -> None:
+        """
+        Overwrite the whole incident document, then read it back and confirm the
+        new status landed. Used by the Orchestrator after every transition --
+        the read-back is the "state is durable before we continue" guarantee.
+        """
+        incident.updated_at = datetime.now(timezone.utc)
+        ref = self._col.document(incident.incident_id)
+        ref.set(incident.model_dump(mode="json"))  # sync; raises on failure
+
+        snap = ref.get()
+        if not snap.exists or (snap.to_dict() or {}).get("status") != incident.status.value:
+            raise RuntimeError(
+                f"Firestore save for incident {incident.incident_id} was not confirmed"
+            )
+
     # -- dedup lookup ------------------------------------------------------- #
 
     def _find_active(self, fault_class: FaultClass) -> Optional[Incident]:
