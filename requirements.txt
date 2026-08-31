@@ -4,3 +4,6 @@ uvicorn
 psutil
 pydantic
 google-cloud-firestore
+google-adk
+google-genai
+google-cloud-aiplatform
