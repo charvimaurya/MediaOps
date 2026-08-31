@@ -221,7 +221,8 @@ class Orchestrator:
             print(f"   vision.symptom={vision.symptom.value}  infra.fault_class={infra.fault_class.value}")
             self._recorder.save(incident)
 
-            # 2. AGGREGATING
+            # 2. AGGREGATING. 
+
             self._enter(incident, IncidentStatus.AGGREGATING, "aggregate")
             incident.evidence = fake_aggregate(
                 incident.incident_id, vision, infra, fail=(fail_at == "aggregate")
@@ -236,7 +237,7 @@ class Orchestrator:
             print(f"   similar_incident_ids={similar_ids}")
             self._recorder.save(incident)
 
-            # 4. DECIDING
+            # 4. DECIDING - remidiation 
             self._enter(incident, IncidentStatus.DECIDING, "decide")
             incident.proposal = fake_remediate(
                 incident.incident_id, incident.evidence, similar_ids, fail=(fail_at == "remediate")
@@ -244,7 +245,7 @@ class Orchestrator:
             print(f"   proposal.action={incident.proposal.action.value}  (model={incident.proposal.model})")
             self._recorder.save(incident)
 
-            # 5. GATING
+            # 5. GATING - safety gate 
             self._enter(incident, IncidentStatus.GATING, "gate")
             decision = fake_safety_gate(
                 incident.incident_id, incident.proposal, fail=(fail_at == "safety_gate")
@@ -256,7 +257,7 @@ class Orchestrator:
             print(f"   safety verdict={decision.verdict.value}  idempotency_key={decision.idempotency_key}")
             self._recorder.save(incident)
 
-            # 6. EXECUTING
+            # 6. EXECUTING 
             self._enter(incident, IncidentStatus.EXECUTING, "execute")
             result = fake_execute(incident.proposal, decision, fail=(fail_at == "execute"))
             incident.actions_attempted.append(incident.proposal.action)

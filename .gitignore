@@ -1,2 +1,6 @@
 *.json
 output/
+.env
+.env.*
+!.env.example
+.DS_Store

@@ -23,12 +23,14 @@ the source video and writes a new file.
 
     python3 simulator/generate_messy_video.py [SOURCE] [OUTPUT]
 
-Defaults: SOURCE = simulator/video.mov (or video.mp4),  OUTPUT = simulator/video_messy.mov
+Defaults: SOURCE = simulator/video.mov (or video.mp4),
+          OUTPUT = simulator/output/messy_video.mov
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -37,15 +39,26 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_SOURCES = [HERE / "video.mov", HERE / "video.mp4"]
-DEFAULT_OUTPUT = HERE / "video_messy.mov"
+DEFAULT_OUTPUT = HERE / "output" / "messy_video.mov"
 
 TOTAL_SECONDS = 23
-SECTIONS = [
-    (0, 5, "healthy -- clean baseline (untouched)"),
-    (5, 11, "encoder overload -- QP 46 crush, deblocking off (sharp DCT blocks)"),
-    (11, 17, "RGB channel shift -- red -7px / blue +7px vs green"),
-    (17, 23, "encoder failure -- forced black"),
-]
+
+# fault name -> (start, end) seconds. THE single source of truth for the section
+# layout -- printed at the end so the Vision Agent can be wired to it.
+FAULT_RANGES: dict[str, tuple[float, float]] = {
+    "healthy": (0.0, 5.0),
+    "overload": (5.0, 11.0),
+    "rgb_shift": (11.0, 17.0),
+    "encoder_failure": (17.0, 23.0),
+}
+
+_SECTION_LABELS = {
+    "healthy": "clean baseline (untouched)",
+    "overload": "encoder overload -- QP 46 crush, deblocking off (sharp DCT blocks)",
+    "rgb_shift": "RGB channel shift -- red -7px / blue +7px vs green",
+    "encoder_failure": "encoder failure -- forced black",
+}
+SECTIONS = [(a, b, _SECTION_LABELS[name]) for name, (a, b) in FAULT_RANGES.items()]
 
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
@@ -164,6 +177,7 @@ def main() -> None:
     if src is None or not src.exists():
         sys.exit(f"source video not found (looked for {', '.join(map(str, DEFAULT_SOURCES))})")
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_OUTPUT
+    out.parent.mkdir(parents=True, exist_ok=True)
 
     fps = probe_fps(src)
     dur = probe_duration(src)
@@ -174,7 +188,7 @@ def main() -> None:
     print(f"output : {out}")
     print("sections:")
     for a, b, label in SECTIONS:
-        print(f"  {a:>2}-{b:<2}s  {label}")
+        print(f"  {a:>4.1f}-{b:<4.1f}s  {label}")
 
     tmp = Path(tempfile.mkdtemp(prefix="messy_"))
     try:
@@ -192,6 +206,12 @@ def main() -> None:
     print(f"\ndone: {out}  ({outdur:.3f}s)")
     print(f"frame digest (sha256 of framemd5): {digest}")
     print(f"file sha256: {hashlib.sha256(out.read_bytes()).hexdigest()}")
+
+    print("\nFAULT -> TIMESTAMP RANGE  (for wiring the Vision Agent)")
+    for name, (a, b) in FAULT_RANGES.items():
+        print(f"  {name:<16} {a:>4.1f} - {b:<4.1f} s   (mid {(a + b) / 2:.1f}s)")
+    print(json.dumps({name: [a, b] for name, (a, b) in FAULT_RANGES.items()}))
+
     print("\nto use it in the simulator (your call -- not done automatically):")
     print(f"  cp {out} {HERE / 'video.mov'}")
     print("  # then restart:  uvicorn simulator.control_api:app --port 8001")

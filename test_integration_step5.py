@@ -132,7 +132,9 @@ def main() -> None:
     _orig_vision = orchestrator.fake_vision
 
     def real_vision(fail: bool = False) -> VisionFinding:
-        finding = vision_agent.analyze_frame()  # real ADK -> Vertex Gemini call
+        # we injected encoder-crash in STAGE 1 -> sample the encoder_failure
+        # section of the messy video
+        finding = vision_agent.analyze_frame(fault="encoder_failure")  # real ADK -> Vertex Gemini call
         if finding is None:
             raise RuntimeError("vision agent returned None -> diagnostic should stop")
         return finding

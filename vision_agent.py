@@ -1,9 +1,13 @@
 """
 The Vision Agent -- real Gemini (via Vertex AI, using Google ADK).
 
-Given an incident, it grabs 3 recent stills from the simulator's live HLS output
-(`simulator/output/primary/`), sends them to Gemini, and returns a schema-valid
-`VisionFinding` describing the viewer-visible symptom.
+Given a fault type, it extracts 3 stills from the MIDDLE of that fault's section
+in the messy video (`simulator/output/messy_video.mov`), sends them to Gemini,
+and returns a schema-valid `VisionFinding` describing the viewer-visible symptom.
+
+Sampling the middle of the section (not the boundary) avoids catching a
+transition frame. The fault -> section-timestamp map is FAULT_SECTIONS below --
+the one place to adjust it.
 
 Tier 1 guardrail: the structured-output check is real. Gemini's answer is parsed
 strictly with Pydantic; if it doesn't validate, ONE strict retry; if it still
@@ -13,21 +17,21 @@ Contract of `analyze_frame()`:
   - returns a valid VisionFinding on success;
   - returns None if Gemini's output fails validation twice
     -> the caller must STOP the diagnostic;
-  - raises on infrastructure failure (no segments, ffmpeg error, Gemini
+  - raises on infrastructure failure (messy video missing, ffmpeg error, Gemini
     API/auth/quota error) -- also fail-closed at the caller.
 
-Standalone: `python3 vision_agent.py`
-Prereqs: simulator running, ffmpeg on PATH, ADC configured, Vertex AI enabled.
+Standalone: `python3 vision_agent.py [fault]`   (fault defaults to "overload")
+Prereqs: simulator/output/messy_video.mov exists (run simulator/generate_messy_video.py),
+         ffmpeg on PATH, ADC configured, Vertex AI enabled.
 """
 
 from __future__ import annotations
 
-import glob
-import json
 import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,11 +66,21 @@ VERTEX_LOCATION = (
     or "us-central1"
 )
 VISION_MODEL = os.environ.get("VISION_MODEL", "gemini-2.5-flash")
-PRIMARY_OUTPUT_DIR = os.environ.get(
-    "PRIMARY_OUTPUT_DIR",
-    os.path.join(os.path.dirname(__file__), "simulator", "output", "primary"),
+MESSY_VIDEO = os.environ.get(
+    "MESSY_VIDEO",
+    os.path.join(os.path.dirname(__file__), "simulator", "output", "messy_video.mov"),
 )
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "ffmpeg")
+
+# fault name -> (start, end) seconds in the messy video. THE one place to adjust.
+# Mirrors FAULT_RANGES in simulator/generate_messy_video.py.
+FAULT_SECTIONS: dict[str, tuple[float, float]] = {
+    "healthy": (0.0, 5.0),
+    "overload": (5.0, 11.0),
+    "rgb_shift": (11.0, 17.0),
+    "encoder_failure": (17.0, 23.0),
+}
+FRAME_SPREAD_SECONDS = 1.0  # 3 stills at mid-1s / mid / mid+1s (still ~1s apart)
 
 FRAME_COUNT = 3
 MAX_ATTEMPTS = 2  # one call + one strict retry
@@ -74,60 +88,42 @@ _APP_NAME = "mediaops_vision_agent"
 
 
 # --------------------------------------------------------------------------- #
-# 1. Pull recent frames from the live HLS output (read-only)
+# 1. Pull frames from the middle of a fault's section (read-only)
 # --------------------------------------------------------------------------- #
 
-def latest_segment(output_dir: str) -> Path:
-    """
-    Newest *complete* HLS segment. The last `.ts` line in playlist.m3u8 is always
-    a finished segment; fall back to the 2nd-newest file by name (the very newest
-    may still be mid-write).
-    """
-    d = Path(output_dir)
-    playlist = d / "playlist.m3u8"
-    if playlist.exists():
-        segs = [
-            line.strip()
-            for line in playlist.read_text().splitlines()
-            if line.strip().endswith(".ts")
-        ]
-        if segs and (d / segs[-1]).exists():
-            return d / segs[-1]
-
-    files = sorted(glob.glob(os.path.join(output_dir, "segment_*.ts")))
-    if len(files) < 2:
-        raise FileNotFoundError(
-            f"need >=2 HLS segments in {output_dir} -- is the simulator running?"
+def _mid_timestamp(fault: str) -> float:
+    """Midpoint (seconds) of `fault`'s section. Raises on an unknown fault."""
+    if fault not in FAULT_SECTIONS:
+        raise ValueError(
+            f"unknown fault {fault!r}; expected one of {sorted(FAULT_SECTIONS)}"
         )
-    return Path(files[-2])
+    start, end = FAULT_SECTIONS[fault]
+    return (start + end) / 2.0
 
 
-def extract_frames(segment: Path, n: int, workdir: Path) -> list[Path]:
+def extract_section_frames(video: Path, fault: str, workdir: Path) -> list[Path]:
     """
-    Pull `n` evenly-spaced JPEG stills from one 2s / 24fps segment (48 frames).
-    e.g. n=3 -> frames 0, 16, 32. Written into `workdir`.
+    Three JPEG stills clustered at the middle of `fault`'s section -- far from the
+    section boundaries so we never catch a transition frame. Written into `workdir`.
     """
-    step = max(1, 48 // n)
-    out_pattern = str(workdir / "frame_%02d.jpg")
-    cmd = [
-        FFMPEG_BIN, "-hide_banner", "-loglevel", "error",
-        "-i", str(segment),
-        "-vf", f"select='not(mod(n,{step}))'",
-        "-fps_mode", "passthrough",
-        "-frames:v", str(n),
-        "-q:v", "3",
-        "-y", out_pattern,
-    ]
-    subprocess.run(cmd, check=True, timeout=20)
-    frames = sorted(workdir.glob("frame_*.jpg"))
-    if not frames:
-        raise RuntimeError(f"ffmpeg produced no frames from {segment}")
+    if not video.exists():
+        raise FileNotFoundError(
+            f"messy video not found: {video} -- run simulator/generate_messy_video.py"
+        )
+    mid = _mid_timestamp(fault)
+    frames: list[Path] = []
+    for i, off in enumerate((-FRAME_SPREAD_SECONDS, 0.0, FRAME_SPREAD_SECONDS)):
+        out = workdir / f"frame_{i:02d}.jpg"
+        subprocess.run(
+            [FFMPEG_BIN, "-hide_banner", "-loglevel", "error",
+             "-ss", f"{mid + off:.3f}", "-i", str(video),
+             "-frames:v", "1", "-q:v", "3", "-y", str(out)],
+            check=True, timeout=20,
+        )
+        if not out.exists():
+            raise RuntimeError(f"ffmpeg produced no frame at t={mid + off:.2f}s from {video}")
+        frames.append(out)
     return frames
-
-
-def _segment_captured_at(segment: Path) -> datetime:
-    """When the simulator finished writing that segment (best proxy for capture time)."""
-    return datetime.fromtimestamp(segment.stat().st_mtime, tz=timezone.utc)
 
 
 # --------------------------------------------------------------------------- #
@@ -153,6 +149,7 @@ Classify the dominant viewer-visible symptom as EXACTLY ONE of:
 - BLACK_FRAME: the picture is mostly or entirely black / no picture
 - FROZEN_FRAME: the 3 frames are identical or barely change -- the video is stuck
 - MACROBLOCKING: blocky compression artefacts, smearing, tearing, visible corruption
+- RGB_SHIFT: persistent colour-channel misregistration / chromatic aberration on every edge, present throughout the frame -- a broadcast fault, not intentional style
 - COLOR_BARS: an SMPTE-style colour-bar test pattern
 - SLATE: a "technical difficulties" / "please stand by" standby card
 - OTHER: a clear visible problem that is none of the above
@@ -169,7 +166,7 @@ _RETRY_SUFFIX = """
 
 YOUR PREVIOUS RESPONSE FAILED VALIDATION: {error}
 Return ONLY a JSON object with exactly these three keys and nothing else:
-  "symptom": one of NORMAL, BLACK_FRAME, FROZEN_FRAME, MACROBLOCKING, COLOR_BARS, SLATE, OTHER
+  "symptom": one of NORMAL, BLACK_FRAME, FROZEN_FRAME, MACROBLOCKING, RGB_SHIFT, COLOR_BARS, SLATE, OTHER
   "description": a short string
   "confidence": a number between 0 and 1
 """
@@ -230,19 +227,20 @@ def _call_gemini(frames: list[Path], instruction: str) -> str:
 def analyze_frame(
     incident: Optional[Incident] = None,
     *,
-    output_dir: Optional[str] = None,
+    fault: str = "healthy",
+    video_path: Optional[str] = None,
 ) -> Optional[VisionFinding]:
-    """See module docstring for the contract."""
-    output_dir = output_dir or PRIMARY_OUTPUT_DIR
+    """See module docstring for the contract. `fault` selects which section of the
+    messy video to sample: one of FAULT_SECTIONS' keys."""
+    video = Path(video_path or MESSY_VIDEO)
     ctx = f" (incident {incident.incident_id})" if incident is not None else ""
-
-    segment = latest_segment(output_dir)
-    frame_captured_at = _segment_captured_at(segment)
-    logger.info("vision%s: analysing %s (captured %s)", ctx, segment.name, frame_captured_at.isoformat())
+    mid = _mid_timestamp(fault)  # validates `fault` before any work
+    frame_captured_at = datetime.now(timezone.utc)
+    logger.info("vision%s: fault=%s -> %s around t=%.1fs", ctx, fault, video.name, mid)
 
     workdir = Path(tempfile.mkdtemp(prefix="vision_"))
     try:
-        frames = extract_frames(segment, FRAME_COUNT, workdir)
+        frames = extract_section_frames(video, fault, workdir)
 
         instruction = _INSTRUCTION
         for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -283,7 +281,8 @@ def analyze_frame(
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    finding = analyze_frame()
+    fault_arg = sys.argv[1] if len(sys.argv) > 1 else "overload"
+    finding = analyze_frame(fault=fault_arg)
     if finding is None:
         print("\nNone -- diagnostic should stop (Gemini output failed validation twice)")
     else:
