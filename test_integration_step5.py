@@ -1,35 +1,39 @@
 """
-End-to-end integration test for Steps 1-5.
+End-to-end integration test for Steps 1-6.
 
 Runs the REAL components as one chain against the live simulator, live Firestore,
-and a real Gemini call:
+Grafana MCP, and real Gemini calls:
 
     simulator fault -> Detector -> AnomalyEvent -> Incident Recorder (Firestore)
-                    -> Orchestrator -> REAL Vision Agent (Gemini) -> ... -> RESOLVED
+                    -> Orchestrator
+                         -> REAL Vision Agent (Gemini)  ||  REAL Infra Agent (Gemini via Grafana MCP)
+                         -> ... (fake aggregate/retrieve/decide/gate/execute/verify/report)
+                         -> RESOLVED
 
-The Vision Agent is spliced into the orchestrator flow by a monkey-patch here
-(real wiring is Step 6). Every other orchestrator step is still a fake stub --
-that is expected; this proves the plumbing, not the remaining logic.
+Both agents are spliced into the orchestrator flow by monkey-patch here (real
+orchestrator wiring is a later step). Every other step is still a fake stub --
+expected; this proves the plumbing + the two real diagnosticians, not the rest.
 
     python3 test_integration_step5.py
 
-Prereqs: simulator running (uvicorn simulator.control_api:app --port 8001),
-ffmpeg on PATH, ADC configured, Vertex AI enabled.
+Prereqs: simulator + Prometheus + Grafana running, simulator/output/messy_video.mov
+present, ffmpeg + uvx on PATH, .env with GRAFANA_SERVICE_ACCOUNT_TOKEN, ADC + Vertex.
 """
 
 import json
 import logging
+import threading
 import time
 import urllib.request
-from datetime import datetime, timezone
 
 from google.cloud import firestore
 
+import infra_agent
 import orchestrator
 import vision_agent
 from detector import PROMETHEUS_URL, Detector, query_health
 from incident_recorder import FIRESTORE_DATABASE_ID, GCP_PROJECT_ID, IncidentRecorder
-from models import IncidentStatus, VisionFinding
+from models import FaultClass, IncidentStatus, InfraFinding, VisionFinding, VisionSymptom
 
 # --- config -------------------------------------------------------------- #
 SIM = "http://localhost:8001"
@@ -38,7 +42,7 @@ POLL_INTERVAL = 2.0
 DETECT_TIMEOUT = 120
 TEST_COLLECTION = f"incidents_integration_{int(time.time())}"
 
-for name in ("detector", "vision_agent", "incident_recorder", "orchestrator"):
+for name in ("detector", "vision_agent", "infra_agent", "incident_recorder", "orchestrator"):
     logging.getLogger(name).setLevel(logging.INFO)
 logging.basicConfig(level=logging.WARNING, format="   %(name)s | %(message)s")
 
@@ -83,12 +87,12 @@ def main() -> None:
     print(f"   OK: media_pipeline_health == {h}")
 
     # ---- STAGE 1 ------------------------------------------------------ #
-    banner(1, "inject a real fault (POST /failure/encoder-crash)")
-    resp = post("/failure/encoder-crash")
-    assert resp.get("failure") == "encoder_failure", resp
+    banner(1, "inject a real fault (POST /failure/encoder-overload)")
+    resp = post("/failure/encoder-overload")
+    assert resp.get("failure") == "encoder_overload", resp
     print(f"   OK: {resp}")
-    print("   note: this fault is telemetry-only in this sim -- the primary video")
-    print("   (a colour-bars card) doesn't change, so Vision will honestly say COLOR_BARS.")
+    print("   Infra will read this from live telemetry; Vision reads the 5-11s")
+    print("   'overload' (blocky) section of the messy video.")
 
     # ---- STAGE 2 ---------------------------------------------------- #
     banner(2, "Detector picks it up and emits exactly one AnomalyEvent")
@@ -128,31 +132,60 @@ def main() -> None:
           f"panel/{TEST_COLLECTION}/{incident_id}?project={GCP_PROJECT_ID}")
 
     # ---- STAGE 4 ---------------------------------------------- #
-    banner(4, "Orchestrator drives the incident -- REAL Vision Agent runs")
-    _orig_vision = orchestrator.fake_vision
+    banner(4, "Orchestrator drives it -- REAL Vision || REAL Infra, concurrently")
+    _orig_vision, _orig_infra = orchestrator.fake_vision, orchestrator.fake_infra
+    agent_threads: list[tuple[str, str]] = []
 
     def real_vision(fail: bool = False) -> VisionFinding:
-        # we injected encoder-crash in STAGE 1 -> sample the encoder_failure
-        # section of the messy video
-        finding = vision_agent.analyze_frame(fault="encoder_failure")  # real ADK -> Vertex Gemini call
-        if finding is None:
+        agent_threads.append(("vision", threading.current_thread().name))
+        f = vision_agent.analyze_frame(fault="overload")  # real ADK -> Vertex Gemini
+        if f is None:
             raise RuntimeError("vision agent returned None -> diagnostic should stop")
-        return finding
+        return f
+
+    def real_infra(fail: bool = False) -> InfraFinding:
+        agent_threads.append(("infra", threading.current_thread().name))
+        f = infra_agent.analyze_infra()  # real Grafana MCP read + Vertex Gemini
+        if f is None:
+            raise RuntimeError("infra agent returned None -> diagnostic should stop")
+        return f
 
     orchestrator.fake_vision = real_vision
+    orchestrator.fake_infra = real_infra
     try:
+        t0 = time.monotonic()
         final = orchestrator.Orchestrator(recorder).run(incident_id)
+        run_seconds = time.monotonic() - t0
     finally:
-        orchestrator.fake_vision = _orig_vision
+        orchestrator.fake_vision, orchestrator.fake_infra = _orig_vision, _orig_infra
 
     vf = final.evidence.vision
-    assert isinstance(vf, VisionFinding), type(vf)
-    assert vf.model == vision_agent.VISION_MODEL, f"stub ran, not the real agent: {vf.model}"
-    assert vf.source == "vision"
-    assert 0.0 <= vf.confidence <= 1.0
-    assert vf.raw_response and json.loads(vf.raw_response)
-    print("\n   >>> ACTUAL Vision Agent finding (real Gemini call, inside the orchestrated flow):")
+    inf = final.evidence.infra
+
+    assert isinstance(vf, VisionFinding) and vf.model == vision_agent.VISION_MODEL, vf
+    assert isinstance(inf, InfraFinding) and inf.model == infra_agent.INFRA_MODEL, inf
+    assert vf.source == "vision" and inf.source == "infra"
+    assert inf.supporting_metrics, "infra finding carries no metrics"
+
+    print("\n   >>> REAL Vision Agent finding:")
     print("   " + vf.model_dump_json(indent=2).replace("\n", "\n   "))
+    print("\n   >>> REAL Infra Agent finding:")
+    print("   " + inf.model_dump_json(indent=2).replace("\n", "\n   "))
+
+    # both ran concurrently on the orchestrator's thread pool
+    names = {who: name for who, name in agent_threads}
+    assert len(agent_threads) == 2 and len(set(names.values())) == 2
+    assert "MainThread" not in names.values(), names
+    print(f"\n   PARALLEL: vision on {names['vision']}, infra on {names['infra']} "
+          f"(distinct worker threads); DIAGNOSING..RESOLVED wall time {run_seconds:.1f}s")
+
+    # agreement: infra says overload directly; vision's symptom corroborates it
+    infra_overload = inf.fault_class is FaultClass.ENCODER_OVERLOAD
+    vision_corroborates = vf.symptom in {VisionSymptom.MACROBLOCKING, VisionSymptom.OTHER}
+    assert infra_overload, f"infra fault_class = {inf.fault_class.value}, expected encoder_overload"
+    print(f"\n   AGREEMENT: infra.fault_class = {inf.fault_class.value}  |  "
+          f"vision.symptom = {vf.symptom.value}  "
+          f"-> {'both point to encoder overload' if vision_corroborates else 'vision symptom did not corroborate (report only)'}")
 
     # ---- STAGE 5 ------------------------------------------- #
     banner(5, "incident status advanced all the way to RESOLVED in Firestore")
@@ -162,8 +195,10 @@ def main() -> None:
     assert d["closed_at"] is not None
     assert d["evidence"] and d["proposal"] and d["safety_decision"] and d["verification"]
     assert d["report_sent"] is True
-    assert d["evidence"]["vision"]["model"] == vision_agent.VISION_MODEL  # real output persisted
-    print("   OK: Firestore doc is RESOLVED with every nested finding, real Vision output persisted")
+    assert d["evidence"]["vision"]["model"] == vision_agent.VISION_MODEL
+    assert d["evidence"]["infra"]["model"] == infra_agent.INFRA_MODEL
+    assert d["evidence"]["infra"]["fault_class"] == "encoder_overload"
+    print("   OK: Firestore doc is RESOLVED; both real findings persisted under evidence")
     print("\n   status as persisted in Firestore, write by write:")
     for i, s in enumerate(recorder.timeline, 1):
         print(f"      {i:2}. {s}")

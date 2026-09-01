@@ -225,6 +225,10 @@ class IncidentEvidence(StrictModel):
     vision: VisionFinding
     infra: InfraFinding
     agreement: bool = Field(description="Do the video symptom and the fault class corroborate each other")
+    fault_class: FaultClass = Field(
+        description="Agreed fault class (infra's, corroborated or abstained-on by vision)"
+    )
+    confidence: float = Field(ge=0.0, le=1.0, description="Overall evidence confidence")
     summary: str = Field(min_length=1, description="Combined text used as the RAG embedding input")
     validation_passed: bool
     validation_errors: list[str] = Field(default_factory=list)

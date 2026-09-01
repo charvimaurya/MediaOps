@@ -113,6 +113,8 @@ def fake_aggregate(
         vision=vision,
         infra=infra,
         agreement=True,
+        fault_class=infra.fault_class,
+        confidence=min(vision.confidence, infra.confidence),
         summary="FAKE aggregated evidence: stub vision + stub infra combined for flow testing",
         validation_passed=True,
         validation_errors=[],
