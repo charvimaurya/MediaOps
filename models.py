@@ -235,6 +235,25 @@ class IncidentEvidence(StrictModel):
 
 
 # --------------------------------------------------------------------------- #
+# 5b. KBMatch -- one retrieved past incident (Knowledge Base + RAG)
+# --------------------------------------------------------------------------- #
+
+class KBMatch(StrictModel):
+    """
+    One past incident retrieved from the Knowledge Base -- precedent context for
+    the Remediation Agent. NOT a recommendation: ``action_taken`` is what was done
+    historically, ``outcome`` whether it worked. The agent decides; this informs.
+    """
+
+    kb_id: str
+    fault_class: str = Field(description="fault of the past incident (KB taxonomy, broader than FaultClass)")
+    action_taken: RemediationAction
+    outcome: str = Field(description="'resolved' or 'not_resolved'")
+    similarity: float = Field(ge=-1.0, le=1.0, description="cosine similarity to the query evidence")
+    summary: str = Field(min_length=1)
+
+
+# --------------------------------------------------------------------------- #
 # 6. RemediationProposal -- Remediation Agent picks ONE action (suggestion only)
 # --------------------------------------------------------------------------- #
 
