@@ -1,5 +1,5 @@
 """
-End-to-end integration test for Steps 1-6.
+End-to-end integration test for Steps 1-7.
 
 Runs the REAL components as one chain against the live simulator, live Firestore,
 Grafana MCP, and real Gemini calls:
@@ -7,12 +7,14 @@ Grafana MCP, and real Gemini calls:
     simulator fault -> Detector -> AnomalyEvent -> Incident Recorder (Firestore)
                     -> Orchestrator
                          -> REAL Vision Agent (Gemini)  ||  REAL Infra Agent (Gemini via Grafana MCP)
-                         -> ... (fake aggregate/retrieve/decide/gate/execute/verify/report)
+                         -> REAL Aggregator (deterministic gate)
+                         -> ... (fake retrieve/decide/gate/execute/verify/report)
                          -> RESOLVED
 
-Both agents are spliced into the orchestrator flow by monkey-patch here (real
-orchestrator wiring is a later step). Every other step is still a fake stub --
-expected; this proves the plumbing + the two real diagnosticians, not the rest.
+Vision and Infra are spliced into the orchestrator flow by monkey-patch here; the
+Aggregator is wired into orchestrator.py for real. Steps after aggregate are still
+fake stubs -- expected; this proves the plumbing + the real diagnosticians + the
+evidence gate.
 
     python3 test_integration_step5.py
 
@@ -132,7 +134,7 @@ def main() -> None:
           f"panel/{TEST_COLLECTION}/{incident_id}?project={GCP_PROJECT_ID}")
 
     # ---- STAGE 4 ---------------------------------------------- #
-    banner(4, "Orchestrator drives it -- REAL Vision || REAL Infra, concurrently")
+    banner(4, "Orchestrator: REAL Vision || REAL Infra, then the REAL Aggregator")
     _orig_vision, _orig_infra = orchestrator.fake_vision, orchestrator.fake_infra
     agent_threads: list[tuple[str, str]] = []
 
@@ -179,13 +181,18 @@ def main() -> None:
     print(f"\n   PARALLEL: vision on {names['vision']}, infra on {names['infra']} "
           f"(distinct worker threads); DIAGNOSING..RESOLVED wall time {run_seconds:.1f}s")
 
-    # agreement: infra says overload directly; vision's symptom corroborates it
-    infra_overload = inf.fault_class is FaultClass.ENCODER_OVERLOAD
-    vision_corroborates = vf.symptom in {VisionSymptom.MACROBLOCKING, VisionSymptom.OTHER}
-    assert infra_overload, f"infra fault_class = {inf.fault_class.value}, expected encoder_overload"
-    print(f"\n   AGREEMENT: infra.fault_class = {inf.fault_class.value}  |  "
-          f"vision.symptom = {vf.symptom.value}  "
-          f"-> {'both point to encoder overload' if vision_corroborates else 'vision symptom did not corroborate (report only)'}")
+    # the REAL Aggregator ran inside the flow -- validate + agreement-check + package
+    ev = final.evidence
+    assert ev.validation_passed is True, ev.validation_errors
+    assert ev.agreement is True, "aggregator did not find vision/infra in agreement"
+    assert ev.fault_class is FaultClass.ENCODER_OVERLOAD, ev.fault_class
+    assert not ev.summary.startswith("FAKE"), "fake_aggregate ran, not the real Aggregator"
+    assert ev.confidence == min(vf.confidence, inf.confidence), ev.confidence
+    print("\n   >>> REAL Aggregator output (IncidentEvidence):")
+    print("   " + ev.model_dump_json(indent=2).replace("\n", "\n   "))
+    print(f"\n   AGREEMENT: vision {vf.symptom.value} + infra {inf.fault_class.value} "
+          f"-> agreed fault_class {ev.fault_class.value}, confidence {ev.confidence}, "
+          f"validation_passed {ev.validation_passed}")
 
     # ---- STAGE 5 ------------------------------------------- #
     banner(5, "incident status advanced all the way to RESOLVED in Firestore")
@@ -198,7 +205,11 @@ def main() -> None:
     assert d["evidence"]["vision"]["model"] == vision_agent.VISION_MODEL
     assert d["evidence"]["infra"]["model"] == infra_agent.INFRA_MODEL
     assert d["evidence"]["infra"]["fault_class"] == "encoder_overload"
-    print("   OK: Firestore doc is RESOLVED; both real findings persisted under evidence")
+    assert d["evidence"]["agreement"] is True
+    assert d["evidence"]["fault_class"] == "encoder_overload"
+    assert d["evidence"]["validation_passed"] is True
+    assert not d["evidence"]["summary"].startswith("FAKE")
+    print("   OK: Firestore doc is RESOLVED; real findings + real aggregated evidence persisted")
     print("\n   status as persisted in Firestore, write by write:")
     for i, s in enumerate(recorder.timeline, 1):
         print(f"      {i:2}. {s}")

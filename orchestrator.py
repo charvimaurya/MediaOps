@@ -10,9 +10,10 @@ Firestore, and drives it through:
 persisting the Incident to Firestore on entering each phase AND again after that
 phase's result is attached.
 
-Every step here is a FAKE stub returning a correctly-shaped object from models.py
-with obviously-fake values. We are testing the FLOW and the GUARDRAILS, not the
-real logic -- stubs get swapped for real components one at a time (CLAUDE.md).
+Steps start as FAKE stubs returning correctly-shaped models.py objects and get
+swapped for real components one at a time (CLAUDE.md). AGGREGATING is now the
+real deterministic gate (aggregator.py); the rest are still stubs here (the real
+Vision/Infra agents are spliced in by the integration test).
 
 Fail-closed: if any stub raises (including one running in the parallel
 vision/infra branch), the incident is marked FAILED in Firestore, later steps do
@@ -30,6 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from aggregator import aggregate
 from incident_recorder import IncidentRecorder
 from models import (
     AnomalyEvent,
@@ -79,8 +81,8 @@ def fake_vision(fail: bool = False) -> VisionFinding:
         raise RuntimeError("forced failure in fake_vision")
     return VisionFinding(
         frame_captured_at=_utcnow(),
-        symptom=VisionSymptom.BLACK_FRAME,
-        description="FAKE vision finding: frame looks black (stub, no real frame read)",
+        symptom=VisionSymptom.MACROBLOCKING,
+        description="FAKE vision finding: blocky artifacts (stub, no real frame read)",
         confidence=0.99,
         model="fake-vision-stub",
         raw_response="FAKE raw gemini response",
@@ -100,24 +102,6 @@ def fake_infra(fail: bool = False) -> InfraFinding:
         confidence=0.98,
         model="fake-infra-stub",
         raw_response="FAKE raw gemini response",
-    )
-
-
-def fake_aggregate(
-    incident_id: str, vision: VisionFinding, infra: InfraFinding, fail: bool = False
-) -> IncidentEvidence:
-    if fail:
-        raise RuntimeError("forced failure in fake_aggregate")
-    return IncidentEvidence(
-        incident_id=incident_id,
-        vision=vision,
-        infra=infra,
-        agreement=True,
-        fault_class=infra.fault_class,
-        confidence=min(vision.confidence, infra.confidence),
-        summary="FAKE aggregated evidence: stub vision + stub infra combined for flow testing",
-        validation_passed=True,
-        validation_errors=[],
     )
 
 
@@ -223,13 +207,14 @@ class Orchestrator:
             print(f"   vision.symptom={vision.symptom.value}  infra.fault_class={infra.fault_class.value}")
             self._recorder.save(incident)
 
-            # 2. AGGREGATING. 
-
+            # 2. AGGREGATING -- REAL deterministic gate (aggregator.py)
             self._enter(incident, IncidentStatus.AGGREGATING, "aggregate")
-            incident.evidence = fake_aggregate(
-                incident.incident_id, vision, infra, fail=(fail_at == "aggregate")
-            )
-            print(f"   evidence.summary={incident.evidence.summary!r}")
+            if fail_at == "aggregate":
+                raise RuntimeError("forced failure in aggregate")  # keep the test hook
+            incident.evidence = aggregate(incident.incident_id, vision, infra)
+            print(f"   evidence: fault_class={incident.evidence.fault_class.value}  "
+                  f"agreement={incident.evidence.agreement}  "
+                  f"confidence={incident.evidence.confidence}")
             self._recorder.save(incident)
 
             # 3. RETRIEVING
