@@ -349,7 +349,10 @@ class Incident(StrictModel):
     closed_at: Optional[datetime] = None
     current_step: str = Field(default="detect", description="Name of the orchestrator step in progress")
 
+    vision: Optional[VisionFinding] = Field(default=None, description="Vision Agent output, before aggregation")
+    infra: Optional[InfraFinding] = Field(default=None, description="Infra Agent output, before aggregation")
     evidence: Optional[IncidentEvidence] = None
+    precedent: list[KBMatch] = Field(default_factory=list, description="RAG hits from the Knowledge Base")
     proposal: Optional[RemediationProposal] = None
     safety_decision: Optional[SafetyDecision] = None
     verification: Optional[VerificationResult] = None

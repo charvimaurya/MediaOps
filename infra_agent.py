@@ -442,7 +442,20 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    fault_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    args = sys.argv[1:]
+    from incident_cli import looks_like_incident_id, run_step
+    from models import IncidentStatus
+
+    if args and looks_like_incident_id(args[0]):
+        # incident mode: read the doc, query live telemetry, write inc.infra
+        run_step(
+            args[0], step_name="diagnose", status=IncidentStatus.DIAGNOSING,
+            produces="infra",
+            compute=lambda inc: analyze_infra(inc),
+        )
+        sys.exit(0)
+
+    fault_arg = args[0] if args else None
     if fault_arg:
         req = urllib.request.Request(f"http://localhost:8001/failure/{fault_arg}", method="POST")
         with urllib.request.urlopen(req, timeout=5) as r:

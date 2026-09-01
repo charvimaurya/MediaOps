@@ -281,10 +281,23 @@ def analyze_frame(
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    fault_arg = sys.argv[1] if len(sys.argv) > 1 else "overload"
-    finding = analyze_frame(fault=fault_arg)
-    if finding is None:
-        print("\nNone -- diagnostic should stop (Gemini output failed validation twice)")
+    args = sys.argv[1:]
+    from incident_cli import looks_like_incident_id, run_step
+    from models import IncidentStatus
+
+    if args and looks_like_incident_id(args[0]):
+        # incident mode: read the doc, sample the messy video, write inc.vision
+        section = args[1] if len(args) > 1 else "overload"
+        run_step(
+            args[0], step_name="diagnose", status=IncidentStatus.DIAGNOSING,
+            produces="vision",
+            compute=lambda inc: analyze_frame(inc, fault=section),
+        )
     else:
-        print()
-        print(finding.model_dump_json(indent=2))
+        fault_arg = args[0] if args else "overload"
+        finding = analyze_frame(fault=fault_arg)
+        if finding is None:
+            print("\nNone -- diagnostic should stop (Gemini output failed validation twice)")
+        else:
+            print()
+            print(finding.model_dump_json(indent=2))

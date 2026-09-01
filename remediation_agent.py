@@ -341,6 +341,23 @@ def _demo_evidence(kind: str) -> IncidentEvidence:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+    from incident_cli import looks_like_incident_id, run_step
+    from models import IncidentStatus
+
+    if len(sys.argv) > 1 and looks_like_incident_id(sys.argv[1]):
+        def _propose(inc):
+            if not inc.precedent:
+                print("   note: incident has no precedent (run knowledge_base.py <id> first "
+                      "for RAG context) -- proposing from evidence alone")
+            return propose_remediation(inc.evidence, inc.precedent)
+
+        # reads inc.evidence + inc.precedent, writes inc.proposal
+        run_step(
+            sys.argv[1], step_name="decide", status=IncidentStatus.DECIDING,
+            requires=("evidence",), produces="proposal", compute=_propose,
+        )
+        sys.exit(0)
+
     kind = sys.argv[1] if len(sys.argv) > 1 else "overload"
     if kind not in _DEMO_SUMMARIES:
         print(f"usage: python3 remediation_agent.py [{'|'.join(_DEMO_SUMMARIES)}]")

@@ -190,3 +190,27 @@ def _build_summary(
         f"Vision (conf {vision.confidence}): {vision.symptom.value} -- {desc}. "
         f"{corr} Overall evidence confidence {overall}."
     )
+
+
+# --------------------------------------------------------------------------- #
+# Manual run -- against one incident_id in Firestore
+# --------------------------------------------------------------------------- #
+
+if __name__ == "__main__":
+    import sys
+
+    from incident_cli import looks_like_incident_id, run_step
+    from models import IncidentStatus
+
+    if len(sys.argv) > 1 and looks_like_incident_id(sys.argv[1]):
+        # reads inc.vision + inc.infra, writes inc.evidence (or a STOP reason)
+        run_step(
+            sys.argv[1], step_name="aggregate", status=IncidentStatus.AGGREGATING,
+            requires=("vision", "infra"), produces="evidence",
+            compute=lambda inc: aggregate(inc.incident_id, inc.vision, inc.infra),
+        )
+    else:
+        print("usage: python3 aggregator.py <incident_id>")
+        print("       (runs the deterministic Aggregator against that incident's "
+              "vision + infra findings in Firestore)")
+        sys.exit(2)

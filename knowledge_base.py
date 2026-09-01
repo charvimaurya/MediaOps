@@ -294,8 +294,34 @@ def retrieve(
 # Manual run -- retrieval demo
 # --------------------------------------------------------------------------- #
 
+def _render_precedent(matches: list[KBMatch]) -> str:
+    if not matches:
+        return (f"no precedent >= relevance threshold {RELEVANCE_THRESHOLD} -- "
+                f"the Remediation Agent will decide from the evidence alone")
+    return "\n".join(
+        f"  {m.kb_id}  sim={m.similarity}  {m.fault_class}  "
+        f"action_taken={m.action_taken.value}  outcome={m.outcome}"
+        for m in matches
+    )
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    import sys
+
+    from incident_cli import looks_like_incident_id, run_step
+    from models import IncidentStatus
+
+    if len(sys.argv) > 1 and looks_like_incident_id(sys.argv[1]):
+        # reads inc.evidence, writes inc.precedent (an empty list is a valid result)
+        run_step(
+            sys.argv[1], step_name="retrieve", status=IncidentStatus.RETRIEVING,
+            requires=("evidence",), produces="precedent",
+            compute=lambda inc: retrieve(inc.evidence),
+            render=_render_precedent,
+        )
+        sys.exit(0)
 
     demo_summary = (
         "encoder_overload on encoder_01. Infra (conf 0.95): media_cpu_usage_percent 97.0, "
