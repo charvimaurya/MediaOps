@@ -22,7 +22,7 @@ from simulator.telemetry import update_metrics
 
 VIDEO_PATH = os.path.join(
     os.path.dirname(__file__),
-    "video.mov",
+    "video.mp4",
 )
 
 # Real segmented output, for simulator/output_accounting.py's RPO

@@ -23,7 +23,7 @@ the source video and writes a new file.
 
     python3 simulator/generate_messy_video.py [SOURCE] [OUTPUT]
 
-Defaults: SOURCE = simulator/video.mov (or video.mp4),
+Defaults: SOURCE = simulator/video.mp4,
           OUTPUT = simulator/output/messy_video.mov
 """
 
@@ -38,7 +38,7 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_SOURCES = [HERE / "video.mov", HERE / "video.mp4"]
+DEFAULT_SOURCES = [HERE / "video.mp4"]
 DEFAULT_OUTPUT = HERE / "output" / "messy_video.mov"
 
 TOTAL_SECONDS = 23
@@ -213,7 +213,7 @@ def main() -> None:
     print(json.dumps({name: [a, b] for name, (a, b) in FAULT_RANGES.items()}))
 
     print("\nto use it in the simulator (your call -- not done automatically):")
-    print(f"  cp {out} {HERE / 'video.mov'}")
+    print(f"  cp {out} {HERE / 'video.mp4'}")
     print("  # then restart:  uvicorn simulator.control_api:app --port 8001")
 
 

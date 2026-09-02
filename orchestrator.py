@@ -1,337 +1,370 @@
-"""
-The Orchestrator (skeleton) -- coordinates the whole incident lifecycle.
+"""Durable coordinator for the real MediaOps incident lifecycle.
 
-It takes an incident_id (from the Incident Recorder), loads that Incident from
-Firestore, and drives it through:
+The orchestrator owns sequencing only. Safety Gate owns authorization, Control
+Plane owns execution, and Verify Recovery owns the recovery verdict.
 
-    DIAGNOSING -> AGGREGATING -> RETRIEVING -> DECIDING -> GATING
-               -> EXECUTING -> VERIFYING -> RESOLVED
-
-persisting the Incident to Firestore on entering each phase AND again after that
-phase's result is attached.
-
-Steps start as FAKE stubs returning correctly-shaped models.py objects and get
-swapped for real components one at a time (CLAUDE.md). AGGREGATING is now the
-real deterministic gate (aggregator.py); the rest are still stubs here (the real
-Vision/Infra agents are spliced in by the integration test).
-
-Fail-closed: if any stub raises (including one running in the parallel
-vision/infra branch), the incident is marked FAILED in Firestore, later steps do
-not run, and run() re-raises.
-
-    python3 orchestrator.py [incident_id]
+    python3 orchestrator.py <incident_id>
 """
 
 from __future__ import annotations
 
 import logging
+import json
+import os
 import sys
-import threading
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import Callable
 
-from aggregator import aggregate
+from aggregator import AggregationError, aggregate
+from control_plane import execute_incident
+from fallback import FallbackStopped, run_fallback
 from incident_recorder import IncidentRecorder
+from infra_agent import analyze_infra
+from kb_writeback import run_writeback
+from knowledge_base import retrieve
 from models import (
-    AnomalyEvent,
-    FaultClass,
     Incident,
-    IncidentEvidence,
     IncidentStatus,
+    ExecutionResult,
     InfraFinding,
-    RemediationAction,
-    RemediationProposal,
-    SafetyCheck,
     SafetyDecision,
     SafetyVerdict,
-    Severity,
     VerificationResult,
+    VerificationVerdict,
     VisionFinding,
-    VisionSymptom,
 )
+from remediation_agent import propose_remediation
+from report import run_report
+from safety_gate import SafetyConfig, run_for_incident as run_safety_gate
+from verify_recovery import run_for_incident as run_verification
+from vision_agent import analyze_frame
+
 
 logger = logging.getLogger("orchestrator")
+
+SIMULATOR_STATE_URL = os.environ.get(
+    "SIMULATOR_STATE_URL", "http://localhost:8001/state"
+)
+SIMULATOR_STATE_TIMEOUT_SECONDS = float(
+    os.environ.get("SIMULATOR_STATE_TIMEOUT_SECONDS", "5")
+)
+
+ACTIVE_FAULT_VIDEO_SECTION = {
+    "encoder_overload": "overload",
+    "encoder_failure": "failure",
+    "network_degradation": "healthy",
+    "healthy": "healthy",
+}
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# Observability aid: the vision/infra stubs record which thread they ran on, so
-# a test can prove the two ran concurrently on distinct worker threads.
-VISION_INFRA_THREADS: list[str] = []
+def read_active_video_section(
+    *,
+    state_url: str = SIMULATOR_STATE_URL,
+    timeout_seconds: float = SIMULATOR_STATE_TIMEOUT_SECONDS,
+    opener=urllib.request.urlopen,
+) -> str:
+    """Map the simulator's read-only active fault state to a video section."""
+    if not state_url or timeout_seconds <= 0:
+        raise ValueError("simulator state URL and positive timeout are required")
+    with opener(state_url, timeout=timeout_seconds) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("simulator /state response must be a JSON object")
+    required_health = ("fps", "dropped_frames", "packet_loss", "encoder_status")
+    missing = [name for name in required_health if name not in payload]
+    if missing:
+        raise ValueError(
+            f"simulator /state response is missing: {', '.join(missing)}"
+        )
+    try:
+        healthy = (
+            int(payload["encoder_status"]) == 1
+            and float(payload["fps"]) >= 24
+            and float(payload["dropped_frames"]) < 5
+            and float(payload["packet_loss"]) < 5
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("simulator /state health fields are malformed") from exc
+    if healthy:
+        return "healthy"
 
-# Test hook: seconds the vision/infra stubs linger, so a test can force the two
-# to actually overlap (a ThreadPoolExecutor spawns a 2nd thread only if the 1st
-# is still busy). 0.0 in normal use -- no effect on the real run or __main__.
-STUB_DELAY_SECONDS = 0.0
+    failure_mode = payload.get("failure_mode")
+    if not isinstance(failure_mode, str) or not failure_mode:
+        raise ValueError("simulator /state response has no valid failure_mode")
+    section = ACTIVE_FAULT_VIDEO_SECTION.get(failure_mode)
+    if section is None:
+        raise ValueError(f"unsupported active failure_mode {failure_mode!r}")
+    return section
 
-
-# --------------------------------------------------------------------------- #
-# The nine FAKE stubs. Each raises when `fail=True`; otherwise returns a
-# schema-valid models.py object. "Fakeness" lives in the free-text fields --
-# enum fields must be real enum members or StrictModel rejects them.
-# --------------------------------------------------------------------------- #
-
-def fake_vision(fail: bool = False) -> VisionFinding:
-    VISION_INFRA_THREADS.append(threading.current_thread().name)
-    time.sleep(STUB_DELAY_SECONDS)
-    if fail:
-        raise RuntimeError("forced failure in fake_vision")
-    return VisionFinding(
-        frame_captured_at=_utcnow(),
-        symptom=VisionSymptom.MACROBLOCKING,
-        description="FAKE vision finding: blocky artifacts (stub, no real frame read)",
-        confidence=0.99,
-        model="fake-vision-stub",
-        raw_response="FAKE raw gemini response",
-    )
-
-
-def fake_infra(fail: bool = False) -> InfraFinding:
-    VISION_INFRA_THREADS.append(threading.current_thread().name)
-    time.sleep(STUB_DELAY_SECONDS)
-    if fail:
-        raise RuntimeError("forced failure in fake_infra")
-    return InfraFinding(
-        fault_class=FaultClass.ENCODER_OVERLOAD,
-        affected_component="encoder_01",
-        description="FAKE infra finding: cpu pinned, fps low (stub, no real telemetry read)",
-        supporting_metrics={"media_cpu_usage_percent": 99.0, "media_fps": 12.0},
-        confidence=0.98,
-        model="fake-infra-stub",
-        raw_response="FAKE raw gemini response",
-    )
-
-
-def fake_retrieve(evidence: IncidentEvidence, fail: bool = False) -> list[str]:
-    if fail:
-        raise RuntimeError("forced failure in fake_retrieve")
-    return ["FAKE-hist-0001", "FAKE-hist-0002"]
-
-
-def fake_remediate(
-    incident_id: str, evidence: IncidentEvidence, similar_ids: list[str], fail: bool = False
-) -> RemediationProposal:
-    if fail:
-        raise RuntimeError("forced failure in fake_remediate")
-    return RemediationProposal(
-        incident_id=incident_id,
-        action=RemediationAction.RESTART_ENCODER,
-        rationale="FAKE rationale: restart clears the (stub) encoder fault",
-        confidence=0.97,
-        model="fake-remediation-stub",
-        similar_incident_ids=similar_ids,
-        precedent_summary="FAKE precedent: 2 similar stub incidents recovered via restart",
-        raw_response="FAKE raw gemini response",
-    )
-
-
-def fake_safety_gate(
-    incident_id: str, proposal: RemediationProposal, fail: bool = False
-) -> SafetyDecision:
-    if fail:
-        raise RuntimeError("forced failure in fake_safety_gate")
-    return SafetyDecision(
-        incident_id=incident_id,
-        action=proposal.action,
-        verdict=SafetyVerdict.ALLOW,
-        checks=[
-            SafetyCheck(name="allow_list", passed=True, detail="FAKE: action is on the stub allow-list"),
-            SafetyCheck(name="confidence", passed=True, detail="FAKE: 0.97 >= threshold"),
-            SafetyCheck(name="cooldown", passed=True, detail="FAKE: no recent action"),
-        ],
-        block_reason=None,
-        idempotency_key=f"FAKE-{incident_id}-{proposal.action.value}",
-    )
-
-
-def fake_execute(
-    proposal: RemediationProposal, decision: SafetyDecision, fail: bool = False
-) -> dict:
-    if fail:
-        raise RuntimeError("forced failure in fake_execute")
-    return {
-        "action": proposal.action.value,
-        "ok": True,
-        "detail": "FAKE execute -- no real control.py call was made",
-        "idempotency_key": decision.idempotency_key,
-    }
-
-
-def fake_verify(
-    incident_id: str, proposal: RemediationProposal, fail: bool = False
-) -> VerificationResult:
-    if fail:
-        raise RuntimeError("forced failure in fake_verify")
-    return VerificationResult(
-        incident_id=incident_id,
-        action=proposal.action,
-        recovered=True,
-        telemetry_ok=True,
-        video_ok=True,
-        health_value=1,
-        stable_window_seconds=20.0,
-        samples=[{"media_pipeline_health": 1.0}, {"media_pipeline_health": 1.0}],
-        failed_checks=[],
-        vision_recheck=None,
-    )
-
-
-def fake_report(incident: Incident, fail: bool = False) -> str:
-    if fail:
-        raise RuntimeError("forced failure in fake_report")
-    action = incident.proposal.action.value if incident.proposal else "?"
-    return f"FAKE Slack report -- incident {incident.incident_id[:8]} resolved by {action} (stub)"
-
-
-# --------------------------------------------------------------------------- #
-# The Orchestrator
-# --------------------------------------------------------------------------- #
 
 class Orchestrator:
-    """Drives one incident through the whole lifecycle, persisting after each step."""
+    """Coordinate real components while keeping Firestore authoritative."""
 
-    def __init__(self, recorder: IncidentRecorder | None = None) -> None:
+    def __init__(
+        self,
+        recorder: IncidentRecorder | None = None,
+        *,
+        vision_runner: Callable[..., VisionFinding | None] = analyze_frame,
+        infra_runner: Callable[[Incident], InfraFinding | None] = analyze_infra,
+        retrieve_runner: Callable[[object], list] = retrieve,
+        remediation_runner: Callable[[object, list], object] = propose_remediation,
+        gate_runner: Callable[[str], SafetyDecision] | None = None,
+        control_runner: Callable[[str], ExecutionResult] | None = None,
+        verify_runner: Callable[[str], VerificationResult] | None = None,
+        fallback_runner: Callable[[str], VerificationResult] | None = None,
+        report_runner: Callable[[str], object] | None = None,
+        writeback_runner: Callable[[str], object] | None = None,
+        active_section_reader: Callable[[], str] = read_active_video_section,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._recorder = recorder or IncidentRecorder()
+        self._vision = vision_runner
+        self._infra = infra_runner
+        self._retrieve = retrieve_runner
+        self._remediate = remediation_runner
+        self._gate = gate_runner or (
+            lambda incident_id: run_safety_gate(
+                incident_id, recorder=self._recorder
+            )
+        )
+        self._control = control_runner or (
+            lambda incident_id: execute_incident(
+                incident_id, recorder=self._recorder
+            )
+        )
+        self._verify = verify_runner or (
+            lambda incident_id: run_verification(
+                incident_id, recorder=self._recorder
+            )
+        )
+        self._fallback = fallback_runner or (
+            lambda incident_id: run_fallback(
+                incident_id,
+                recorder=self._recorder,
+                gate_runner=lambda value: run_safety_gate(
+                    value, recorder=self._recorder
+                ),
+                control_runner=lambda value: execute_incident(
+                    value, recorder=self._recorder
+                ),
+                verify_runner=lambda value: run_verification(
+                    value, recorder=self._recorder
+                ),
+            )
+        )
+        self._report = report_runner or (
+            lambda incident_id: run_report(
+                incident_id, recorder=self._recorder
+            )
+        )
+        self._writeback = writeback_runner or (
+            lambda incident_id: run_writeback(
+                incident_id, recorder=self._recorder
+            )
+        )
+        self._active_section = active_section_reader
+        self._sleep = sleeper
 
-    def run(self, incident_id: str, *, fail_at: str | None = None) -> Incident:
+    def run(self, incident_id: str) -> Incident:
         incident = self._recorder.load(incident_id)
-        print(f"\n=== orchestrating incident {incident_id} (status={incident.status.value}) ===")
+        final_stops = {
+            IncidentStatus.BLOCKED,
+            IncidentStatus.CANNOT_VERIFY,
+            IncidentStatus.AUTOMATION_FAILED,
+            IncidentStatus.ESCALATED,
+            IncidentStatus.FAILED,
+            IncidentStatus.CLOSED,
+        }
+        if incident.status in final_stops:
+            return incident
+        print(f"\n=== orchestrating {incident_id} ===")
 
         try:
-            # 1. DIAGNOSING -- vision || infra concurrently
             self._enter(incident, IncidentStatus.DIAGNOSING, "diagnose")
-            vision, infra = self._parallel_vision_infra(fail_at)
-            print(f"   vision.symptom={vision.symptom.value}  infra.fault_class={infra.fault_class.value}")
+            vision, infra = self._parallel_diagnosis(incident)
+            incident.vision = vision
+            incident.infra = infra
             self._recorder.save(incident)
 
-            # 2. AGGREGATING -- REAL deterministic gate (aggregator.py)
             self._enter(incident, IncidentStatus.AGGREGATING, "aggregate")
-            if fail_at == "aggregate":
-                raise RuntimeError("forced failure in aggregate")  # keep the test hook
-            incident.evidence = aggregate(incident.incident_id, vision, infra)
-            print(f"   evidence: fault_class={incident.evidence.fault_class.value}  "
-                  f"agreement={incident.evidence.agreement}  "
-                  f"confidence={incident.evidence.confidence}")
+            try:
+                incident.evidence = aggregate(incident.incident_id, vision, infra)
+            except AggregationError as exc:
+                return self._terminal(
+                    incident, IncidentStatus.ESCALATED, "aggregate", str(exc)
+                )
             self._recorder.save(incident)
 
-            # 3. RETRIEVING
             self._enter(incident, IncidentStatus.RETRIEVING, "retrieve")
-            similar_ids = fake_retrieve(incident.evidence, fail=(fail_at == "retrieve"))
-            incident.notes.append(f"FAKE retrieve: {similar_ids}")
-            print(f"   similar_incident_ids={similar_ids}")
+            incident.precedent = self._retrieve(incident.evidence)
             self._recorder.save(incident)
 
-            # 4. DECIDING - remidiation 
             self._enter(incident, IncidentStatus.DECIDING, "decide")
-            incident.proposal = fake_remediate(
-                incident.incident_id, incident.evidence, similar_ids, fail=(fail_at == "remediate")
+            incident.proposal = self._remediate(
+                incident.evidence, incident.precedent
             )
-            print(f"   proposal.action={incident.proposal.action.value}  (model={incident.proposal.model})")
+            if incident.proposal is None:
+                raise RuntimeError("Remediation Agent returned no valid proposal")
             self._recorder.save(incident)
 
-            # 5. GATING - safety gate 
             self._enter(incident, IncidentStatus.GATING, "gate")
-            decision = fake_safety_gate(
-                incident.incident_id, incident.proposal, fail=(fail_at == "safety_gate")
-            )
-            incident.safety_decision = decision
-            incident.idempotency_key = decision.idempotency_key
+            decision = self._gate(incident_id)
+            incident = self._recorder.load(incident_id)
             if decision.verdict is not SafetyVerdict.ALLOW:
-                raise RuntimeError(f"safety gate BLOCKED: {decision.block_reason}")
-            print(f"   safety verdict={decision.verdict.value}  idempotency_key={decision.idempotency_key}")
-            self._recorder.save(incident)
+                return self._terminal(
+                    incident,
+                    IncidentStatus.BLOCKED,
+                    "gate",
+                    decision.block_reason or "Safety Gate blocked without a reason",
+                )
 
-            # 6. EXECUTING 
             self._enter(incident, IncidentStatus.EXECUTING, "execute")
-            result = fake_execute(incident.proposal, decision, fail=(fail_at == "execute"))
-            incident.actions_attempted.append(incident.proposal.action)
-            incident.attempt_count += 1
-            incident.notes.append(f"FAKE execute: {result}")
-            print(f"   executed {result['action']}  ok={result['ok']}")
-            self._recorder.save(incident)
+            execution = self._control(incident_id)
+            incident = self._recorder.load(incident_id)
+            if not execution.success:
+                incident.automation_failure_reason = execution.detail
+                return self._terminal(
+                    incident,
+                    IncidentStatus.AUTOMATION_FAILED,
+                    "execute",
+                    execution.detail,
+                )
 
-            # 7. VERIFYING
             self._enter(incident, IncidentStatus.VERIFYING, "verify")
-            verification = fake_verify(
-                incident.incident_id, incident.proposal, fail=(fail_at == "verify")
-            )
-            incident.verification = verification
-            if not verification.recovered:
-                raise RuntimeError("verification says the incident is NOT recovered")
-            print(f"   verified recovered={verification.recovered}  health_value={verification.health_value}")
+            verification = self._verify(incident_id)
+            incident = self._recorder.load(incident_id)
+            if verification.verdict is VerificationVerdict.CANNOT_VERIFY:
+                return self._terminal(
+                    incident,
+                    IncidentStatus.CANNOT_VERIFY,
+                    "verify",
+                    "; ".join(verification.failed_checks)
+                    or "verification unavailable",
+                )
+            if verification.verdict is VerificationVerdict.RECOVERY_FAILED:
+                incident = self._wait_for_fallback_cooldown(incident)
+                try:
+                    verification = self._fallback(incident_id)
+                except FallbackStopped:
+                    return self._recorder.load(incident_id)
+                incident = self._recorder.load(incident_id)
+
+            if verification.verdict is not VerificationVerdict.RECOVERED:
+                raise RuntimeError(
+                    f"unhandled verification verdict {verification.verdict.value}"
+                )
+
+            incident.status = IncidentStatus.RECOVERED
+            incident.current_step = "report"
+            incident.notes.append("recovery positively verified in both domains")
             self._recorder.save(incident)
 
-            # 8. RESOLVED -- report, then close
-            report = fake_report(incident, fail=(fail_at == "report"))
-            incident.notes.append(f"FAKE report: {report}")
-            incident.report_sent = True
-            print(f"   {report}")
-            self._enter(incident, IncidentStatus.RESOLVED, "resolve")
+            self._report(incident_id)
+            incident = self._recorder.load(incident_id)
+            incident.current_step = "kb_writeback"
+            self._recorder.save(incident)
+            self._writeback(incident_id)
+
+            incident = self._recorder.load(incident_id)
+            incident.status = IncidentStatus.CLOSED
+            incident.current_step = "close"
             incident.closed_at = _utcnow()
+            incident.notes.append("incident lifecycle closed")
             self._recorder.save(incident)
-
-            print(f"=== incident {incident_id} RESOLVED ===\n")
-
+            print(f"=== incident {incident_id} CLOSED ===")
+            return incident
         except Exception as exc:
+            incident = self._recorder.load(incident_id)
             self._fail_closed(incident, exc)
             raise
 
-        return incident
+    def _parallel_diagnosis(
+        self, incident: Incident
+    ) -> tuple[VisionFinding | None, InfraFinding | None]:
+        # Read ground-truth stream state before starting either worker. Vision
+        # receives only a section selection; Infra independently classifies
+        # bounded metrics and never supplies Vision's answer.
+        section = self._active_section()
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="diagnosis") as pool:
+            vision_future = pool.submit(
+                self._vision, incident.model_copy(deep=True), fault=section
+            )
+            infra_future = pool.submit(
+                self._infra, incident.model_copy(deep=True)
+            )
+            return vision_future.result(), infra_future.result()
 
-    # -- helpers ---------------------------------------------------------- #
+    def _wait_for_fallback_cooldown(self, incident: Incident) -> Incident:
+        if incident.execution is None:
+            return incident
+        cooldown = SafetyConfig.from_env().cooldown_seconds
+        elapsed = (_utcnow() - incident.execution.executed_at).total_seconds()
+        remaining = max(0.0, cooldown - elapsed)
+        incident.current_step = "fallback_wait"
+        incident.notes.append(
+            f"recovery failed; waiting {remaining:.1f}s for "
+            f"{cooldown:.1f}s action cooldown"
+        )
+        self._recorder.save(incident)
+        if remaining:
+            self._sleep(remaining)
+        return self._recorder.load(incident.incident_id)
 
     def _enter(self, incident: Incident, status: IncidentStatus, step: str) -> None:
         incident.status = status
         incident.current_step = step
-        print(f"-> {status.value}")
         self._recorder.save(incident)
+        print(f"-> {status.value}")
 
-    def _parallel_vision_infra(self, fail_at: str | None) -> tuple[VisionFinding, InfraFinding]:
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="agent") as pool:
-            fv = pool.submit(fake_vision, fail=(fail_at == "vision"))
-            fi = pool.submit(fake_infra, fail=(fail_at == "infra"))
-            vision = fv.result()  # re-raises if the worker raised
-            infra = fi.result()
-        return vision, infra
+    def _terminal(
+        self,
+        incident: Incident,
+        status: IncidentStatus,
+        step: str,
+        reason: str,
+    ) -> Incident:
+        incident.status = status
+        incident.current_step = step
+        incident.closed_at = _utcnow()
+        incident.notes.append(f"{status.value} during {step}: {reason}")
+        self._recorder.save(incident)
+        print(f"-> {status.value}: {reason}")
+        return incident
 
     def _fail_closed(self, incident: Incident, exc: Exception) -> None:
         failed_step = incident.current_step
-        logger.error("workflow failed during %r: %r", failed_step, exc)
-        try:
-            incident.status = IncidentStatus.FAILED
-            incident.current_step = "failed"
-            incident.notes.append(f"FAILED during {failed_step}: {exc!r}")
-            incident.closed_at = _utcnow()
-            self._recorder.save(incident)
-            print(f"✗ incident {incident.incident_id} marked FAILED in Firestore (failed during {failed_step})\n")
-        except Exception:
-            logger.exception("could not persist FAILED status -- Firestore write also failed")
-            raise
+        incident.status = IncidentStatus.FAILED
+        incident.current_step = "failed"
+        incident.closed_at = _utcnow()
+        incident.notes.append(
+            f"FAILED during {failed_step}: {type(exc).__name__}: {exc}"
+        )
+        self._recorder.save(incident)
+        logger.error(
+            "incident %s failed during %s: %s",
+            incident.incident_id,
+            failed_step,
+            exc,
+        )
 
-
-# --------------------------------------------------------------------------- #
-# Manual end-to-end run
-# --------------------------------------------------------------------------- #
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-    if len(sys.argv) > 1:
-        incident_id = sys.argv[1]
-    else:
-        seed = AnomalyEvent(
-            fault_class=FaultClass.UNKNOWN,
-            severity=Severity.HIGH,
-            reason="FAKE seed anomaly for the orchestrator skeleton demo",
-            health_value=0,
-            telemetry_snapshot={"media_fps": 18.0},
-            breach_count=6,
-        )
-        incident_id = IncidentRecorder().record(seed)
-        print(f"seeded incident {incident_id}")
-
-    final = Orchestrator().run(incident_id)
+    if len(sys.argv) != 2:
+        sys.exit("usage: python3 orchestrator.py <incident_id>")
+    try:
+        final = Orchestrator().run(sys.argv[1])
+    except KeyError:
+        sys.exit(f"ERROR: no incident {sys.argv[1]!r} in Firestore")
+    except Exception as exc:
+        sys.exit(f"FAILED: {type(exc).__name__}: {exc}")
     print(final.model_dump_json(indent=2))
+    if final.status is not IncidentStatus.CLOSED:
+        sys.exit(1)

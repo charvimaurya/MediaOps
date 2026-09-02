@@ -15,6 +15,7 @@ from models import (
     Incident,
     IncidentEvidence,
     InfraFinding,
+    ExecutionResult,
     RemediationAction,
     RemediationProposal,
     SafetyVerdict,
@@ -186,6 +187,22 @@ class SafetyGateTests(unittest.TestCase):
         self.assert_blocked(incident, "cooldown")
 
         incident.updated_at = NOW - timedelta(seconds=60)
+        result = evaluate_safety(incident, config=CONFIG, now=NOW)
+        self.assertEqual(result.verdict, SafetyVerdict.ALLOW)
+
+    def test_cooldown_uses_execution_time_not_later_document_update(self) -> None:
+        incident = make_incident(action=RemediationAction.REDUCE_PROFILE)
+        incident.actions_attempted = [RemediationAction.RESTART_ENCODER]
+        incident.attempt_count = 1
+        incident.execution = ExecutionResult(
+            incident_id=incident.incident_id,
+            executed_at=NOW - timedelta(seconds=60),
+            action=RemediationAction.RESTART_ENCODER,
+            idempotency_key="previous-key",
+            success=True,
+            detail="called",
+        )
+        incident.updated_at = NOW  # proposal/status persistence happened later
         result = evaluate_safety(incident, config=CONFIG, now=NOW)
         self.assertEqual(result.verdict, SafetyVerdict.ALLOW)
 

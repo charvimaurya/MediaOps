@@ -15,9 +15,11 @@ from simulator.failures import (
 )
 
 from simulator import pipeline
+from simulator.control import PipelineControl
 
 
 logger = logging.getLogger(__name__)
+control_action_lock = threading.Lock()
 
 
 # ============================================================
@@ -85,6 +87,10 @@ async def lifespan(app: FastAPI):
         pipeline.start_ffmpeg()
     except FileNotFoundError as exc:
         logger.warning("ffmpeg not started: %s", exc)
+
+    # The controller must live in this process: it mutates the same pipeline
+    # state and FFmpeg handle exported by this API's telemetry loop.
+    app.state.pipeline_control = PipelineControl()
 
     telemetry_thread = threading.Thread(
         target=pipeline.telemetry_loop,
@@ -178,3 +184,39 @@ def reset_pipeline():
         "status": "recovered",
         "failure_mode": "healthy",
     }
+
+
+# ============================================================
+# INTERNAL CONTROL SURFACE -- fixed actions only, no raw command endpoint
+# ============================================================
+
+def _run_control(action: str, call):
+    with control_action_lock:
+        ok, detail = call()
+    return {"action": action, "ok": ok, "detail": detail}
+
+
+@app.post("/control/restart-encoder")
+def control_restart_encoder():
+    return _run_control(
+        "RESTART_ENCODER", app.state.pipeline_control.restart_encoder
+    )
+
+
+@app.post("/control/reduce-profile")
+def control_reduce_profile():
+    return _run_control(
+        "REDUCE_PROFILE", lambda: app.state.pipeline_control.reduce_bitrate(0.5)
+    )
+
+
+@app.post("/control/switch-source")
+def control_switch_source():
+    return _run_control(
+        "SWITCH_SOURCE", app.state.pipeline_control.switch_backup
+    )
+
+
+@app.post("/control/failover")
+def control_failover():
+    return _run_control("FAILOVER", app.state.pipeline_control.failover)

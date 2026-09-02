@@ -92,6 +92,9 @@ class IncidentStatus(str, Enum):
     GATING = "GATING"
     EXECUTING = "EXECUTING"
     VERIFYING = "VERIFYING"
+    BLOCKED = "BLOCKED"
+    CANNOT_VERIFY = "CANNOT_VERIFY"
+    AUTOMATION_FAILED = "AUTOMATION_FAILED"
     RECOVERED = "RECOVERED"
     RESOLVED = "RESOLVED"
     FAILED = "FAILED"
@@ -104,6 +107,9 @@ class IncidentStatus(str, Enum):
 # per problem). Authoritative domain knowledge -- lives with the enum.
 TERMINAL_STATUSES = frozenset({
     IncidentStatus.RECOVERED,
+    IncidentStatus.BLOCKED,
+    IncidentStatus.CANNOT_VERIFY,
+    IncidentStatus.AUTOMATION_FAILED,
     IncidentStatus.RESOLVED,
     IncidentStatus.FAILED,
     IncidentStatus.ESCALATED,
@@ -145,6 +151,12 @@ class VisionSymptom(str, Enum):
 class SafetyVerdict(str, Enum):
     ALLOW = "ALLOW"
     BLOCK = "BLOCK"
+
+
+class VerificationVerdict(str, Enum):
+    RECOVERED = "RECOVERED"
+    RECOVERY_FAILED = "RECOVERY_FAILED"
+    CANNOT_VERIFY = "CANNOT_VERIFY"
 
 
 # --------------------------------------------------------------------------- #
@@ -302,7 +314,26 @@ class SafetyDecision(StrictModel):
 
 
 # --------------------------------------------------------------------------- #
-# 8. VerificationResult -- deterministic recovery check (BOTH video + telemetry)
+# 8. ExecutionResult -- Control Plane command result (NOT recovery)
+# --------------------------------------------------------------------------- #
+
+class ExecutionResult(StrictModel):
+    """What the deterministic Control Plane ran and whether that call succeeded.
+
+    ``success`` describes only the control call. It never means the incident
+    recovered; independent verification owns that decision.
+    """
+
+    incident_id: str
+    executed_at: datetime = Field(default_factory=_utcnow)
+    action: RemediationAction
+    idempotency_key: str = Field(min_length=1)
+    success: bool
+    detail: str = Field(min_length=1)
+
+
+# --------------------------------------------------------------------------- #
+# 9. VerificationResult -- deterministic recovery check (BOTH video + telemetry)
 # --------------------------------------------------------------------------- #
 
 class VerificationResult(StrictModel):
@@ -315,10 +346,16 @@ class VerificationResult(StrictModel):
     incident_id: str
     verified_at: datetime = Field(default_factory=_utcnow)
     action: RemediationAction = Field(description="The action that was actually executed")
+    verdict: VerificationVerdict
     recovered: bool
     telemetry_ok: bool
     video_ok: bool
-    health_value: int = Field(ge=0, le=1, description="media_pipeline_health at the end of the window")
+    health_value: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="media_pipeline_health at window end, or None when unavailable",
+    )
     stable_window_seconds: float = Field(ge=0.0, description="How long health was observed to hold")
     samples: list[dict[str, float]] = Field(default_factory=list, description="Readings taken across the window")
     failed_checks: list[str] = Field(default_factory=list)
@@ -355,10 +392,29 @@ class Incident(StrictModel):
     precedent: list[KBMatch] = Field(default_factory=list, description="RAG hits from the Knowledge Base")
     proposal: Optional[RemediationProposal] = None
     safety_decision: Optional[SafetyDecision] = None
+    execution: Optional[ExecutionResult] = Field(
+        default=None,
+        description="Control call result only; does not establish recovery",
+    )
     verification: Optional[VerificationResult] = None
+
+    execution_history: list[ExecutionResult] = Field(
+        default_factory=list,
+        description="Prior control-call results retained when a fallback replaces the current attempt",
+    )
+    verification_history: list[VerificationResult] = Field(
+        default_factory=list,
+        description="Prior verification results retained when a fallback is attempted",
+    )
+    fallback_attempted: bool = False
+    automation_failure_reason: Optional[str] = None
 
     actions_attempted: list[RemediationAction] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     idempotency_key: Optional[str] = Field(default=None, description="Set once, before the first execution")
     report_sent: bool = False
+    report_claimed: bool = False
+    report_error: Optional[str] = None
+    kb_writeback_id: Optional[str] = None
+    kb_writeback_error: Optional[str] = None
     notes: list[str] = Field(default_factory=list, description="Append-only human-readable log lines")

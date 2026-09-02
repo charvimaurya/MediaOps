@@ -82,7 +82,7 @@ class SafetyConfig:
     def from_env(cls) -> "SafetyConfig":
         min_confidence = float(os.environ.get("SAFETY_MIN_CONFIDENCE", "0.80"))
         max_actions = int(os.environ.get("SAFETY_MAX_ACTIONS", "2"))
-        cooldown_seconds = float(os.environ.get("SAFETY_COOLDOWN_SECONDS", "60"))
+        cooldown_seconds = float(os.environ.get("SAFETY_COOLDOWN_SECONDS", "15"))
         radius_name = os.environ.get("SAFETY_MAX_BLAST_RADIUS", "stream").strip().lower()
 
         if not 0.0 <= min_confidence <= 1.0:
@@ -206,7 +206,14 @@ def _check_cooldown(
 ) -> SafetyCheck:
     if incident.attempt_count == 0:
         return _pass("cooldown", "no previous action")
-    previous = incident.updated_at
+    # A proposal/status save also changes ``updated_at``.  Cooldown is about
+    # the prior control action, so use its immutable execution timestamp when
+    # available; retain updated_at only for older records without execution.
+    previous = (
+        incident.execution.executed_at
+        if incident.execution is not None
+        else incident.updated_at
+    )
     if previous.tzinfo is None or previous.utcoffset() is None:
         return _fail("cooldown", "last-action timestamp is not timezone-aware")
     elapsed = (now - previous).total_seconds()
@@ -301,9 +308,11 @@ def evaluate_safety(
         return _blocked(incident, action, checks, f"{check.name}: {check.detail}")
 
 
-def run_for_incident(incident_id: str) -> SafetyDecision:
+def run_for_incident(
+    incident_id: str, *, recorder: IncidentRecorder | None = None
+) -> SafetyDecision:
     """Load, evaluate, and durably store one incident's gate decision."""
-    recorder = IncidentRecorder()
+    recorder = recorder or IncidentRecorder()
     incident = recorder.load(incident_id)
     incident.status = IncidentStatus.GATING
     incident.current_step = "gate"

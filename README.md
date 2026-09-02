@@ -7,8 +7,8 @@ monitoring, and a control API for reproducing infrastructure incidents on demand
 
 ```
 simulator/
-  video.mov         source clip FFmpeg processes continuously
-  pipeline.py        runs FFmpeg against video.mov, tracks process health, exposes /metrics on :8000
+  video.mp4         source clip FFmpeg processes continuously
+  pipeline.py        runs FFmpeg against video.mp4, tracks process health, exposes /metrics on :8000
   telemetry.py        Prometheus metric definitions
   failures.py         failure-scenario state (healthy / overload / degradation / crash)
   control_api.py       FastAPI control service on :8001
@@ -24,11 +24,11 @@ requirements.txt       Python dependencies
 
 ### 1. Real media processing pipeline
 
-A real `video.mov` file is processed through FFmpeg, creating a continuous
+A real `video.mp4` file is processed through FFmpeg, creating a continuous
 media-processing workload:
 
 ```
-video.mov → FFmpeg → media processing workload
+video.mp4 → FFmpeg → media processing workload
 ```
 
 FFmpeg runs continuously using the video as the source, providing a realistic
@@ -129,7 +129,7 @@ same control interface to perform automated remediation.
 
 ```
                          ┌──────────────┐
-                         │  video.mov   │
+                         │  video.mp4   │
                          └──────┬───────┘
                                 │
                                 ▼
