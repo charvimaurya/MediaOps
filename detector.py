@@ -253,12 +253,14 @@ if __name__ == "__main__":
     # Recorder (which dedups against any existing active incident for the same
     # fault). Imported here so `import detector` stays free of Firestore.
     from incident_recorder import IncidentRecorder
+    from observability import log_event
 
     _recorder = IncidentRecorder()
 
     def _record_and_print(event: AnomalyEvent) -> None:
         print_anomaly(event)
         incident_id = _recorder.record(event)
+        log_event("detector", incident_id, "detect", "incident_recorded", detail=event.reason)
         print(f">>> recorded to Firestore: incident {incident_id}\n")
 
     Detector(on_anomaly=_record_and_print).run_forever()

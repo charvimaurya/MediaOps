@@ -56,6 +56,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from models import FaultClass, Incident, InfraFinding
+from observability import log_event
 
 logger = logging.getLogger("infra_agent")
 
@@ -460,7 +461,7 @@ def analyze_infra(
 
         logger.info("infra%s attempt %d: %s (confidence %.2f)",
                     ctx, attempt, parsed.fault_class.value, parsed.confidence)
-        return InfraFinding(
+        finding = InfraFinding(
             fault_class=parsed.fault_class,
             affected_component=_normalize_affected_component(parsed.affected_component),
             description=parsed.description,
@@ -469,9 +470,16 @@ def analyze_infra(
             model=INFRA_MODEL,
             raw_response=raw,
         )
+        if incident is not None:
+            log_event("infra", incident.incident_id, "diagnose", "completed",
+                      detail=f"{finding.fault_class.value}; target={finding.affected_component}; confidence={finding.confidence:.3f}")
+        return finding
 
     logger.error("infra%s: %d invalid responses -- returning None (diagnostic should stop)",
                  ctx, MAX_ATTEMPTS)
+    if incident is not None:
+        log_event("infra", incident.incident_id, "diagnose", "no_valid_finding",
+                  detail=f"{MAX_ATTEMPTS} invalid responses")
     return None
 
 

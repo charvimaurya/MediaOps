@@ -21,6 +21,7 @@ from typing import Any, Callable
 from google.cloud import firestore
 
 from incident_recorder import IncidentRecorder
+from observability import log_event
 from models import (
     ExecutionResult,
     Incident,
@@ -164,6 +165,7 @@ def execute_incident(
 ) -> ExecutionResult:
     """Atomically claim, execute once, and persist the control-call result."""
     active_recorder = recorder or IncidentRecorder()
+    log_event("control_plane", incident_id, "execute", "started")
     db = active_recorder._db
     incident_ref = active_recorder._col.document(incident_id)
     ledger_col = db.collection(CONTROL_EXECUTIONS_COLLECTION)
@@ -208,6 +210,8 @@ def execute_incident(
 
     state, payload = claim(transaction)
     if state == "completed":
+        log_event("control_plane", incident_id, "execute", "idempotent_noop",
+                  action=payload.action, detail="returned prior execution result")
         return payload
 
     action, key, ledger_ref = payload
@@ -265,6 +269,8 @@ def execute_incident(
             "control call completed but result finalization failed; "
             "the IN_PROGRESS claim prevents duplicate execution"
         ) from exc
+    log_event("control_plane", incident_id, "execute", "succeeded" if result.success else "failed",
+              action=result.action, detail=result.detail)
     return result
 
 

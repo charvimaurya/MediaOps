@@ -38,6 +38,7 @@ from google.cloud import firestore
 from google.genai import types
 
 from models import IncidentEvidence, KBMatch, RemediationAction
+from observability import log_event
 
 logger = logging.getLogger("knowledge_base")
 
@@ -277,7 +278,7 @@ def retrieve(
         len(scored), len(kept), RELEVANCE_THRESHOLD, [r["kb_id"] for r, _ in kept],
     )
 
-    return [
+    result = [
         KBMatch(
             kb_id=rec["kb_id"],
             fault_class=rec["fault_class"],
@@ -288,6 +289,9 @@ def retrieve(
         )
         for rec, sim in kept
     ]
+    log_event("knowledge_base", evidence.incident_id, "retrieve", "completed",
+              detail=f"matches={len(result)}")
+    return result
 
 
 # --------------------------------------------------------------------------- #

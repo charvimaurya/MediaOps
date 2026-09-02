@@ -45,6 +45,7 @@ from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from models import Incident, VisionFinding, VisionSymptom
+from observability import log_event
 
 logger = logging.getLogger("vision_agent")
 
@@ -256,7 +257,7 @@ def analyze_frame(
                 "vision%s attempt %d: %s (confidence %.2f)",
                 ctx, attempt, parsed.symptom.value, parsed.confidence,
             )
-            return VisionFinding(
+            finding = VisionFinding(
                 frame_captured_at=frame_captured_at,
                 symptom=parsed.symptom,
                 description=parsed.description,
@@ -264,11 +265,18 @@ def analyze_frame(
                 model=VISION_MODEL,
                 raw_response=raw,
             )
+            if incident is not None:
+                log_event("vision", incident.incident_id, "diagnose", "completed",
+                          detail=f"{finding.symptom.value}; confidence={finding.confidence:.3f}")
+            return finding
 
         logger.error(
             "vision%s: %d invalid responses -- returning None (diagnostic should stop)",
             ctx, MAX_ATTEMPTS,
         )
+        if incident is not None:
+            log_event("vision", incident.incident_id, "diagnose", "no_valid_finding",
+                      detail=f"{MAX_ATTEMPTS} invalid responses")
         return None
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

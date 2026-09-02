@@ -214,7 +214,7 @@ class OrchestratorTests(unittest.TestCase):
 
         expected = {
             "encoder_overload": "overload",
-            "encoder_failure": "failure",
+            "encoder_failure": "encoder_failure",
             "network_degradation": "healthy",
         }
         for mode, section in expected.items():
@@ -289,6 +289,8 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(final.status, IncidentStatus.BLOCKED)
         self.assertEqual(h.calls, ["remediate", "gate"])
         self.assertIsNone(final.execution)
+        self.assertEqual(final.terminal_step, "gate")
+        self.assertIn("policy: blocked", final.terminal_reason)
 
     def test_cannot_verify_stops_before_reporting(self):
         h = Harness(verify_verdict=VerificationVerdict.CANNOT_VERIFY)
@@ -296,6 +298,8 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(final.status, IncidentStatus.CANNOT_VERIFY)
         self.assertNotIn("report", h.calls)
         self.assertNotIn("writeback", h.calls)
+        self.assertEqual(final.terminal_step, "verify")
+        self.assertIn("telemetry unavailable", final.terminal_reason)
 
     def test_recovery_failed_waits_then_uses_one_fallback(self):
         h = Harness(verify_verdict=VerificationVerdict.RECOVERY_FAILED)
@@ -336,6 +340,8 @@ class OrchestratorTests(unittest.TestCase):
             orch.run(h.recorder.incident.incident_id)
         self.assertEqual(h.recorder.incident.status, IncidentStatus.FAILED)
         self.assertTrue(any("FAILED during retrieve" in n for n in h.recorder.incident.notes))
+        self.assertEqual(h.recorder.incident.terminal_step, "retrieve")
+        self.assertIn("boom", h.recorder.incident.terminal_reason)
 
 
 if __name__ == "__main__":

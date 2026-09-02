@@ -34,6 +34,7 @@ from models import (
     Incident,
     IncidentStatus,
 )
+from observability import record_event
 
 logger = logging.getLogger("incident_recorder")
 
@@ -96,6 +97,8 @@ class IncidentRecorder:
             return existing.incident_id
 
         incident = Incident(anomaly=event, current_step="record")
+        record_event(incident, "detector", "detect", "incident_recorded",
+                     status=IncidentStatus.DETECTED, detail=event.reason)
         self._create(incident)
         logger.info("created incident %s for anomaly %s", incident.incident_id, event.event_id)
         return incident.incident_id

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from typing import Callable
 
 from control_plane import execute_incident
@@ -21,6 +22,7 @@ from models import (
 )
 from safety_gate import ACTION_COMPATIBILITY, run_for_incident as run_safety_gate
 from verify_recovery import run_for_incident as run_verification
+from observability import record_event
 
 
 FALLBACK_PRIORITY = {
@@ -60,7 +62,12 @@ def _mark_failed(recorder: IncidentRecorder, incident_id: str, reason: str) -> I
     incident.status = IncidentStatus.AUTOMATION_FAILED
     incident.current_step = "fallback"
     incident.automation_failure_reason = reason
+    incident.terminal_step = "fallback"
+    incident.terminal_reason = reason
+    incident.closed_at = datetime.now(timezone.utc)
     incident.notes.append(f"automation failed: {reason}")
+    record_event(incident, "fallback", "fallback", "automation_failed",
+                 status=IncidentStatus.AUTOMATION_FAILED, detail=reason)
     recorder.save(incident)
     return incident
 
@@ -93,6 +100,10 @@ def run_fallback(
         if incident.execution is not None:
             incident.execution_history.append(incident.execution)
         incident.verification_history.append(incident.verification)
+        if incident.proposal is not None:
+            incident.proposal_history.append(incident.proposal)
+        if incident.safety_decision is not None:
+            incident.safety_decision_history.append(incident.safety_decision)
         confidence = min(
             incident.proposal.confidence if incident.proposal is not None else 0.0,
             incident.evidence.confidence if incident.evidence is not None else 0.0,
@@ -113,6 +124,8 @@ def run_fallback(
         incident.idempotency_key = None
         incident.current_step = "fallback"
         incident.notes.append(f"selected one fallback candidate: {alternate.value}")
+        record_event(incident, "fallback", "select_alternate", "selected",
+                     action=alternate, detail="one-shot compatible alternate")
         active_recorder.save(incident)
 
         decision = gate_runner(incident_id)
@@ -129,6 +142,10 @@ def run_fallback(
                 f"fallback did not recover: {verification.verdict.value}; "
                 f"{'; '.join(verification.failed_checks)}"
             )
+        incident = active_recorder.load(incident_id)
+        record_event(incident, "fallback", "fallback", "recovered",
+                     action=alternate, detail="alternate passed gate, executed, and verified")
+        active_recorder.save(incident)
         return verification
     except FallbackStopped as exc:
         _mark_failed(active_recorder, incident_id, str(exc))

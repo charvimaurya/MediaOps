@@ -159,6 +159,18 @@ class VerificationVerdict(str, Enum):
     CANNOT_VERIFY = "CANNOT_VERIFY"
 
 
+class LifecycleEvent(StrictModel):
+    """One durable, ordered breadcrumb in an incident's lifecycle."""
+
+    timestamp: datetime = Field(default_factory=_utcnow)
+    component: str = Field(min_length=1)
+    step: str = Field(min_length=1)
+    outcome: str = Field(min_length=1)
+    status: Optional[IncidentStatus] = None
+    action: Optional[RemediationAction] = None
+    detail: str = ""
+
+
 # --------------------------------------------------------------------------- #
 # 1. AnomalyEvent -- output of the Detector
 # --------------------------------------------------------------------------- #
@@ -385,6 +397,12 @@ class Incident(StrictModel):
     updated_at: datetime = Field(default_factory=_utcnow)
     closed_at: Optional[datetime] = None
     current_step: str = Field(default="detect", description="Name of the orchestrator step in progress")
+    lifecycle_events: list[LifecycleEvent] = Field(
+        default_factory=list,
+        description="Append-only structured timeline for tracing and demos",
+    )
+    terminal_step: Optional[str] = None
+    terminal_reason: Optional[str] = None
 
     vision: Optional[VisionFinding] = Field(default=None, description="Vision Agent output, before aggregation")
     infra: Optional[InfraFinding] = Field(default=None, description="Infra Agent output, before aggregation")
@@ -392,6 +410,8 @@ class Incident(StrictModel):
     precedent: list[KBMatch] = Field(default_factory=list, description="RAG hits from the Knowledge Base")
     proposal: Optional[RemediationProposal] = None
     safety_decision: Optional[SafetyDecision] = None
+    proposal_history: list[RemediationProposal] = Field(default_factory=list)
+    safety_decision_history: list[SafetyDecision] = Field(default_factory=list)
     execution: Optional[ExecutionResult] = Field(
         default=None,
         description="Control call result only; does not establish recovery",

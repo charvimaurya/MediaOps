@@ -124,6 +124,8 @@ class FallbackTests(unittest.TestCase):
             )
         self.assertEqual(recorder.incident.status, IncidentStatus.AUTOMATION_FAILED)
         self.assertIn("no untried compatible", recorder.incident.automation_failure_reason)
+        self.assertEqual(recorder.incident.terminal_step, "fallback")
+        self.assertIn("no untried compatible", recorder.incident.terminal_reason)
 
     def test_blocked_gate_never_calls_control(self):
         incident = make_incident()
@@ -150,6 +152,8 @@ class FallbackTests(unittest.TestCase):
                 control_runner=lambda _: self.fail("control must not run"),
             )
         self.assertEqual(recorder.incident.status, IncidentStatus.AUTOMATION_FAILED)
+        self.assertEqual(recorder.incident.terminal_step, "fallback")
+        self.assertIn("Safety Gate blocked fallback", recorder.incident.terminal_reason)
 
 
 if __name__ == "__main__":

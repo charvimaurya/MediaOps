@@ -17,6 +17,7 @@ from enum import IntEnum
 from typing import Callable
 
 from incident_recorder import IncidentRecorder
+from observability import log_event
 from models import (
     FaultClass,
     Incident,
@@ -313,6 +314,7 @@ def run_for_incident(
 ) -> SafetyDecision:
     """Load, evaluate, and durably store one incident's gate decision."""
     recorder = recorder or IncidentRecorder()
+    log_event("safety_gate", incident_id, "gate", "started")
     incident = recorder.load(incident_id)
     incident.status = IncidentStatus.GATING
     incident.current_step = "gate"
@@ -322,6 +324,8 @@ def run_for_incident(
     incident.safety_decision = decision
     incident.idempotency_key = decision.idempotency_key
     recorder.save(incident)
+    log_event("safety_gate", incident_id, "gate", decision.verdict.value.lower(),
+              action=decision.action, detail=decision.block_reason or "all checks passed")
     return decision
 
 

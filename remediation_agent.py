@@ -50,6 +50,7 @@ from models import (
     RemediationAction,
     RemediationProposal,
 )
+from observability import log_event
 
 logger = logging.getLogger("remediation_agent")
 
@@ -258,7 +259,7 @@ def propose_remediation(
             "remediation%s attempt %d: %s (confidence %.2f)",
             ctx, attempt, parsed.action.value, parsed.confidence,
         )
-        return RemediationProposal(
+        proposal = RemediationProposal(
             incident_id=evidence.incident_id,
             action=parsed.action,
             rationale=parsed.rationale,
@@ -268,11 +269,16 @@ def propose_remediation(
             precedent_summary=_render_precedent(precedent) if precedent else None,
             raw_response=raw,
         )
+        log_event("remediation", evidence.incident_id, "propose", "completed",
+                  action=proposal.action, detail=f"confidence={proposal.confidence:.3f}")
+        return proposal
 
     logger.error(
         "remediation%s: %d invalid responses -- returning None (caller should stop)",
         ctx, MAX_ATTEMPTS,
     )
+    log_event("remediation", evidence.incident_id, "propose", "no_valid_proposal",
+              detail=f"{MAX_ATTEMPTS} invalid responses")
     return None
 
 

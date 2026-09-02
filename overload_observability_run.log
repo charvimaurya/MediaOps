@@ -1,0 +1,627 @@
+/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (1.26.20) or chardet (7.3.0)/charset_normalizer (3.4.6) doesn't match a supported version!
+  warnings.warn(
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "diagnose", "timestamp": "2026-09-02T23:24:20.000575+00:00"}
+vision (incident de95cd65e6fc4e3f9a99db17c9fcf9ff): fault=overload -> messy_video.mov around t=8.0s
+infra (incident de95cd65e6fc4e3f9a99db17c9fcf9ff): reading 10 metrics via grafana_mcp over 3600s window
+time=2026-09-03T01:24:20.864+02:00 level=INFO msg="Using Grafana configuration" url=http://localhost:3000 api_key_set=true basic_auth_set=false org_id=1 extra_headers_count=0
+time=2026-09-03T01:24:20.889+02:00 level=INFO msg="Fetched public URL from Grafana frontend settings" public_url=http://localhost:3000
+time=2026-09-03T01:24:20.905+02:00 level=INFO msg="no MCP datasources discovered"
+time=2026-09-03T01:24:20.905+02:00 level=INFO msg="Starting Grafana MCP server using stdio transport" version=v1.3.0
+time=2026-09-03T01:24:20.906+02:00 level=INFO msg="Using Grafana configuration" url=http://localhost:3000 api_key_set=true basic_auth_set=false org_id=1 extra_headers_count=0
+Deprecated. Please migrate to the async method.
+Deprecated. Please migrate to the async method.
+Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.VERTEX_AI, stream: False
+AFC is enabled with max remote calls: 10.
+Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.VERTEX_AI, stream: False
+AFC is enabled with max remote calls: 10.
+Response received from the model.
+vision (incident de95cd65e6fc4e3f9a99db17c9fcf9ff) attempt 1: MACROBLOCKING (confidence 0.95)
+{"action": null, "component": "vision", "detail": "MACROBLOCKING; confidence=0.950", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "diagnose", "timestamp": "2026-09-02T23:24:25.746660+00:00"}
+Response received from the model.
+infra (incident de95cd65e6fc4e3f9a99db17c9fcf9ff) attempt 1: encoder_overload (confidence 0.95)
+{"action": null, "component": "infra", "detail": "encoder_overload; target=encoder_01; confidence=0.950", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "diagnose", "timestamp": "2026-09-02T23:24:26.588410+00:00"}
+{"action": null, "component": "vision", "detail": "MACROBLOCKING", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "diagnose", "timestamp": "2026-09-02T23:24:26.588608+00:00"}
+{"action": null, "component": "infra", "detail": "encoder_overload", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "diagnose", "timestamp": "2026-09-02T23:24:26.588661+00:00"}
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "aggregate", "timestamp": "2026-09-02T23:24:27.209552+00:00"}
+{"action": null, "component": "aggregator", "detail": "agreement=True; confidence=0.950", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "aggregate", "timestamp": "2026-09-02T23:24:27.852767+00:00"}
+{"action": null, "component": "aggregator", "detail": "agreement=True", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "aggregate", "timestamp": "2026-09-02T23:24:28.471140+00:00"}
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "retrieve", "timestamp": "2026-09-02T23:24:29.074031+00:00"}
+HTTP Request: POST https://us-central1-aiplatform.googleapis.com/v1beta1/projects/broadcast-ops-copilot/locations/us-central1/publishers/google/models/text-embedding-005:predict "HTTP/1.1 200 OK"
+kb retrieve: 9 records, 3 >= threshold 0.80 -> ['incident-e3adfe780db64059b22482fe3242f303', 'incident-751566ba55b04eaaa89f52e4a82d31f3', 'kb-0001']
+{"action": null, "component": "knowledge_base", "detail": "matches=3", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "retrieve", "timestamp": "2026-09-02T23:24:31.900276+00:00"}
+{"action": null, "component": "knowledge_base", "detail": "matches=3", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "retrieve", "timestamp": "2026-09-02T23:24:31.900503+00:00"}
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "decide", "timestamp": "2026-09-02T23:24:32.569647+00:00"}
+remediation (incident de95cd65e6fc4e3f9a99db17c9fcf9ff): fault=encoder_overload  agreement=True  precedent=3
+Deprecated. Please migrate to the async method.
+Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.VERTEX_AI, stream: False
+AFC is enabled with max remote calls: 10.
+Response received from the model.
+remediation (incident de95cd65e6fc4e3f9a99db17c9fcf9ff) attempt 1: RESTART_ENCODER (confidence 0.95)
+{"action": "RESTART_ENCODER", "component": "remediation", "detail": "confidence=0.950", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "propose", "timestamp": "2026-09-02T23:24:38.061100+00:00"}
+{"action": "RESTART_ENCODER", "component": "remediation", "detail": "The current encoder_overload on encoder_01 with high CPU usage (97%) and MACROBLOCKING vision symptom perfectly matches past incidents (e.g., incident-e3adfe780db64059b22482fe3242f303, kb-0001) which were successfully resolved by RESTART_ENCODER.", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "propose", "timestamp": "2026-09-02T23:24:38.061438+00:00"}
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "gate", "timestamp": "2026-09-02T23:24:38.707598+00:00"}
+{"action": null, "component": "safety_gate", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "gate", "timestamp": "2026-09-02T23:24:39.327027+00:00"}
+{"action": "RESTART_ENCODER", "component": "safety_gate", "detail": "all checks passed", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "allow", "step": "gate", "timestamp": "2026-09-02T23:24:40.915747+00:00"}
+{"action": "RESTART_ENCODER", "component": "safety_gate", "detail": "all checks passed", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "allow", "step": "gate", "timestamp": "2026-09-02T23:24:41.263140+00:00"}
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "execute", "timestamp": "2026-09-02T23:24:41.885101+00:00"}
+{"action": null, "component": "control_plane", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "execute", "timestamp": "2026-09-02T23:24:42.543577+00:00"}
+{"action": "RESTART_ENCODER", "component": "control_plane", "detail": "encoder restarted in 0.25s", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "succeeded", "step": "execute", "timestamp": "2026-09-02T23:24:45.282732+00:00"}
+{"action": "RESTART_ENCODER", "component": "control_plane", "detail": "encoder restarted in 0.25s", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "succeeded", "step": "execute", "timestamp": "2026-09-02T23:24:45.429860+00:00"}
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "verify", "timestamp": "2026-09-02T23:24:46.041615+00:00"}
+{"action": null, "component": "verify", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "verify", "timestamp": "2026-09-02T23:24:46.712253+00:00"}
+vision (incident de95cd65e6fc4e3f9a99db17c9fcf9ff): fault=healthy -> messy_video.mov around t=2.5s
+Deprecated. Please migrate to the async method.
+Sending out request, model: gemini-2.5-flash, backend: GoogleLLMVariant.VERTEX_AI, stream: False
+AFC is enabled with max remote calls: 10.
+Response received from the model.
+vision (incident de95cd65e6fc4e3f9a99db17c9fcf9ff) attempt 1: NORMAL (confidence 1.00)
+{"action": null, "component": "vision", "detail": "NORMAL; confidence=1.000", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "diagnose", "timestamp": "2026-09-02T23:25:19.597803+00:00"}
+{"action": "RESTART_ENCODER", "component": "verify", "detail": "both domains healthy", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "recovered", "step": "verify", "timestamp": "2026-09-02T23:25:20.305343+00:00"}
+{"action": "RESTART_ENCODER", "component": "verify", "detail": "both domains healthy", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "recovered", "step": "verify", "timestamp": "2026-09-02T23:25:20.482440+00:00"}
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "completed", "step": "recovered", "timestamp": "2026-09-02T23:25:21.226366+00:00"}
+{"action": null, "component": "report", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "report", "timestamp": "2026-09-02T23:25:21.881661+00:00"}
+{"action": null, "component": "report", "detail": "Slack report sent", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "sent", "step": "report", "timestamp": "2026-09-02T23:25:24.168101+00:00"}
+{"action": null, "component": "report", "detail": "Slack report sent", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "sent", "step": "report", "timestamp": "2026-09-02T23:25:24.619131+00:00"}
+{"action": null, "component": "kb_writeback", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "started", "step": "kb_writeback", "timestamp": "2026-09-02T23:25:25.014447+00:00"}
+HTTP Request: POST https://us-central1-aiplatform.googleapis.com/v1beta1/projects/broadcast-ops-copilot/locations/us-central1/publishers/google/models/text-embedding-005:predict "HTTP/1.1 200 OK"
+{"action": null, "component": "kb_writeback", "detail": "incident-de95cd65e6fc4e3f9a99db17c9fcf9ff", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "created", "step": "kb_writeback", "timestamp": "2026-09-02T23:25:26.935364+00:00"}
+{"action": null, "component": "kb_writeback", "detail": "incident-de95cd65e6fc4e3f9a99db17c9fcf9ff", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "written", "step": "kb_writeback", "timestamp": "2026-09-02T23:25:27.078295+00:00"}
+{"action": null, "component": "orchestrator", "detail": "", "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff", "outcome": "closed", "step": "close", "timestamp": "2026-09-02T23:25:27.078576+00:00"}
+
+=== orchestrating de95cd65e6fc4e3f9a99db17c9fcf9ff ===
+-> DIAGNOSING
+-> AGGREGATING
+-> RETRIEVING
+-> DECIDING
+-> GATING
+-> EXECUTING
+-> VERIFYING
+=== incident de95cd65e6fc4e3f9a99db17c9fcf9ff CLOSED ===
+{
+  "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff",
+  "status": "CLOSED",
+  "anomaly": {
+    "event_id": "a17d60c684274d68b993258505d7002e",
+    "detected_at": "2026-09-02T16:55:04.871794Z",
+    "fault_class": "unknown",
+    "severity": "HIGH",
+    "reason": "media_pipeline_health=0 sustained 8s (5 consecutive polls, window 8s)",
+    "health_value": 0,
+    "telemetry_snapshot": {
+      "media_bitrate_mbps": 5.2,
+      "media_memory_usage_percent": 88.0,
+      "media_cpu_usage_percent": 97.0,
+      "media_encoding_latency_ms": 190.0,
+      "media_dropped_frames_percent": 8.2,
+      "media_network_latency_ms": 30.0,
+      "media_packet_loss_percent": 0.1,
+      "media_encoder_status": 1.0,
+      "media_fps": 18.0
+    },
+    "breach_count": 5,
+    "source": "prometheus"
+  },
+  "repeated_anomalies": [
+    {
+      "event_id": "d8777b9061b34b0fb8fe97cbc0ae3679",
+      "detected_at": "2026-09-02T23:23:33.611716Z",
+      "fault_class": "unknown",
+      "severity": "HIGH",
+      "reason": "media_pipeline_health=0 sustained 15s (6 consecutive polls, window 15s)",
+      "health_value": 0,
+      "telemetry_snapshot": {
+        "media_bitrate_mbps": 5.2,
+        "media_memory_usage_percent": 88.0,
+        "media_cpu_usage_percent": 97.0,
+        "media_encoding_latency_ms": 190.0,
+        "media_dropped_frames_percent": 8.2,
+        "media_network_latency_ms": 30.0,
+        "media_encoder_status": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_fps": 18.0
+      },
+      "breach_count": 6,
+      "source": "prometheus"
+    },
+    {
+      "event_id": "0fe8eb2347c3417a928b08e11ab9c038",
+      "detected_at": "2026-09-02T23:23:36.082838Z",
+      "fault_class": "unknown",
+      "severity": "HIGH",
+      "reason": "media_pipeline_health=0 sustained 15s (6 consecutive polls, window 15s)",
+      "health_value": 0,
+      "telemetry_snapshot": {
+        "media_bitrate_mbps": 5.2,
+        "media_memory_usage_percent": 88.0,
+        "media_cpu_usage_percent": 97.0,
+        "media_encoding_latency_ms": 190.0,
+        "media_dropped_frames_percent": 8.2,
+        "media_network_latency_ms": 30.0,
+        "media_encoder_status": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_fps": 18.0
+      },
+      "breach_count": 6,
+      "source": "prometheus"
+    },
+    {
+      "event_id": "ef6903dadfa04b598033af2424d4fa68",
+      "detected_at": "2026-09-02T23:23:53.589071Z",
+      "fault_class": "unknown",
+      "severity": "HIGH",
+      "reason": "media_pipeline_health=0 sustained 15s (6 consecutive polls, window 15s)",
+      "health_value": 0,
+      "telemetry_snapshot": {
+        "media_bitrate_mbps": 5.2,
+        "media_memory_usage_percent": 88.0,
+        "media_cpu_usage_percent": 97.0,
+        "media_encoding_latency_ms": 190.0,
+        "media_dropped_frames_percent": 8.2,
+        "media_network_latency_ms": 30.0,
+        "media_encoder_status": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_fps": 18.0
+      },
+      "breach_count": 6,
+      "source": "prometheus"
+    }
+  ],
+  "created_at": "2026-09-02T16:55:06.874267Z",
+  "updated_at": "2026-09-02T23:25:27.078625Z",
+  "closed_at": "2026-09-02T23:25:27.078537Z",
+  "current_step": "close",
+  "lifecycle_events": [
+    {
+      "timestamp": "2026-09-02T23:24:20.000562Z",
+      "component": "orchestrator",
+      "step": "diagnose",
+      "outcome": "started",
+      "status": "DIAGNOSING",
+      "action": null,
+      "detail": ""
+    },
+    {
+      "timestamp": "2026-09-02T23:24:26.588601Z",
+      "component": "vision",
+      "step": "diagnose",
+      "outcome": "completed",
+      "status": null,
+      "action": null,
+      "detail": "MACROBLOCKING"
+    },
+    {
+      "timestamp": "2026-09-02T23:24:26.588658Z",
+      "component": "infra",
+      "step": "diagnose",
+      "outcome": "completed",
+      "status": null,
+      "action": null,
+      "detail": "encoder_overload"
+    },
+    {
+      "timestamp": "2026-09-02T23:24:27.209533Z",
+      "component": "orchestrator",
+      "step": "aggregate",
+      "outcome": "started",
+      "status": "AGGREGATING",
+      "action": null,
+      "detail": ""
+    },
+    {
+      "timestamp": "2026-09-02T23:24:28.471121Z",
+      "component": "aggregator",
+      "step": "aggregate",
+      "outcome": "completed",
+      "status": null,
+      "action": null,
+      "detail": "agreement=True"
+    },
+    {
+      "timestamp": "2026-09-02T23:24:29.074004Z",
+      "component": "orchestrator",
+      "step": "retrieve",
+      "outcome": "started",
+      "status": "RETRIEVING",
+      "action": null,
+      "detail": ""
+    },
+    {
+      "timestamp": "2026-09-02T23:24:31.900497Z",
+      "component": "knowledge_base",
+      "step": "retrieve",
+      "outcome": "completed",
+      "status": null,
+      "action": null,
+      "detail": "matches=3"
+    },
+    {
+      "timestamp": "2026-09-02T23:24:32.569634Z",
+      "component": "orchestrator",
+      "step": "decide",
+      "outcome": "started",
+      "status": "DECIDING",
+      "action": null,
+      "detail": ""
+    },
+    {
+      "timestamp": "2026-09-02T23:24:38.061424Z",
+      "component": "remediation",
+      "step": "propose",
+      "outcome": "completed",
+      "status": null,
+      "action": "RESTART_ENCODER",
+      "detail": "The current encoder_overload on encoder_01 with high CPU usage (97%) and MACROBLOCKING vision symptom perfectly matches past incidents (e.g., incident-e3adfe780db64059b22482fe3242f303, kb-0001) which were successfully resolved by RESTART_ENCODER."
+    },
+    {
+      "timestamp": "2026-09-02T23:24:38.707574Z",
+      "component": "orchestrator",
+      "step": "gate",
+      "outcome": "started",
+      "status": "GATING",
+      "action": null,
+      "detail": ""
+    },
+    {
+      "timestamp": "2026-09-02T23:24:41.263130Z",
+      "component": "safety_gate",
+      "step": "gate",
+      "outcome": "allow",
+      "status": null,
+      "action": "RESTART_ENCODER",
+      "detail": "all checks passed"
+    },
+    {
+      "timestamp": "2026-09-02T23:24:41.885087Z",
+      "component": "orchestrator",
+      "step": "execute",
+      "outcome": "started",
+      "status": "EXECUTING",
+      "action": null,
+      "detail": ""
+    },
+    {
+      "timestamp": "2026-09-02T23:24:45.429843Z",
+      "component": "control_plane",
+      "step": "execute",
+      "outcome": "succeeded",
+      "status": null,
+      "action": "RESTART_ENCODER",
+      "detail": "encoder restarted in 0.25s"
+    },
+    {
+      "timestamp": "2026-09-02T23:24:46.041596Z",
+      "component": "orchestrator",
+      "step": "verify",
+      "outcome": "started",
+      "status": "VERIFYING",
+      "action": null,
+      "detail": ""
+    },
+    {
+      "timestamp": "2026-09-02T23:25:20.482424Z",
+      "component": "verify",
+      "step": "verify",
+      "outcome": "recovered",
+      "status": null,
+      "action": "RESTART_ENCODER",
+      "detail": "both domains healthy"
+    },
+    {
+      "timestamp": "2026-09-02T23:25:21.226348Z",
+      "component": "orchestrator",
+      "step": "recovered",
+      "outcome": "completed",
+      "status": "RECOVERED",
+      "action": null,
+      "detail": ""
+    },
+    {
+      "timestamp": "2026-09-02T23:25:24.619121Z",
+      "component": "report",
+      "step": "report",
+      "outcome": "sent",
+      "status": null,
+      "action": null,
+      "detail": "Slack report sent"
+    },
+    {
+      "timestamp": "2026-09-02T23:25:27.078286Z",
+      "component": "kb_writeback",
+      "step": "kb_writeback",
+      "outcome": "written",
+      "status": null,
+      "action": null,
+      "detail": "incident-de95cd65e6fc4e3f9a99db17c9fcf9ff"
+    },
+    {
+      "timestamp": "2026-09-02T23:25:27.078571Z",
+      "component": "orchestrator",
+      "step": "close",
+      "outcome": "closed",
+      "status": "CLOSED",
+      "action": null,
+      "detail": ""
+    }
+  ],
+  "terminal_step": null,
+  "terminal_reason": null,
+  "vision": {
+    "source": "vision",
+    "observed_at": "2026-09-02T23:24:25.746625Z",
+    "frame_captured_at": "2026-09-02T23:24:20.640984Z",
+    "symptom": "MACROBLOCKING",
+    "description": "The video displays severe macroblocking and pixelation across the entire frame, making the image appear blocky and distorted.",
+    "confidence": 0.95,
+    "model": "gemini-2.5-flash",
+    "raw_response": "{\n  \"symptom\": \"MACROBLOCKING\",\n  \"description\": \"The video displays severe macroblocking and pixelation across the entire frame, making the image appear blocky and distorted.\",\n  \"confidence\": 0.95\n}"
+  },
+  "infra": {
+    "source": "infra",
+    "observed_at": "2026-09-02T23:24:26.588394Z",
+    "fault_class": "encoder_overload",
+    "affected_component": "encoder_01",
+    "description": "The encoder is overloaded as media_cpu_usage_percent is 97.0, media_fps is 18.0, and media_encoding_latency_ms is 190.0, while media_packet_loss_percent is 0.1 and media_network_latency_ms is 30.0, and media_encoder_status is 1.0.",
+    "supporting_metrics": {
+      "media_pipeline_health": 0.0,
+      "media_bitrate_mbps": 5.2,
+      "media_memory_usage_percent": 88.0,
+      "media_cpu_usage_percent": 97.0,
+      "media_encoding_latency_ms": 190.0,
+      "media_dropped_frames_percent": 8.2,
+      "media_network_latency_ms": 30.0,
+      "media_packet_loss_percent": 0.1,
+      "media_encoder_status": 1.0,
+      "media_fps": 18.0
+    },
+    "confidence": 0.95,
+    "model": "gemini-2.5-flash",
+    "raw_response": "{\n  \"fault_class\": \"encoder_overload\",\n  \"affected_component\": \"encoder_01\",\n  \"description\": \"The encoder is overloaded as media_cpu_usage_percent is 97.0, media_fps is 18.0, and media_encoding_latency_ms is 190.0, while media_packet_loss_percent is 0.1 and media_network_latency_ms is 30.0, and media_encoder_status is 1.0.\",\n  \"confidence\": 0.95\n}"
+  },
+  "evidence": {
+    "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff",
+    "aggregated_at": "2026-09-02T23:24:27.852748Z",
+    "vision": {
+      "source": "vision",
+      "observed_at": "2026-09-02T23:24:25.746625Z",
+      "frame_captured_at": "2026-09-02T23:24:20.640984Z",
+      "symptom": "MACROBLOCKING",
+      "description": "The video displays severe macroblocking and pixelation across the entire frame, making the image appear blocky and distorted.",
+      "confidence": 0.95,
+      "model": "gemini-2.5-flash",
+      "raw_response": "{\n  \"symptom\": \"MACROBLOCKING\",\n  \"description\": \"The video displays severe macroblocking and pixelation across the entire frame, making the image appear blocky and distorted.\",\n  \"confidence\": 0.95\n}"
+    },
+    "infra": {
+      "source": "infra",
+      "observed_at": "2026-09-02T23:24:26.588394Z",
+      "fault_class": "encoder_overload",
+      "affected_component": "encoder_01",
+      "description": "The encoder is overloaded as media_cpu_usage_percent is 97.0, media_fps is 18.0, and media_encoding_latency_ms is 190.0, while media_packet_loss_percent is 0.1 and media_network_latency_ms is 30.0, and media_encoder_status is 1.0.",
+      "supporting_metrics": {
+        "media_fps": 18.0,
+        "media_bitrate_mbps": 5.2,
+        "media_memory_usage_percent": 88.0,
+        "media_cpu_usage_percent": 97.0,
+        "media_encoding_latency_ms": 190.0,
+        "media_dropped_frames_percent": 8.2,
+        "media_network_latency_ms": 30.0,
+        "media_encoder_status": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_pipeline_health": 0.0
+      },
+      "confidence": 0.95,
+      "model": "gemini-2.5-flash",
+      "raw_response": "{\n  \"fault_class\": \"encoder_overload\",\n  \"affected_component\": \"encoder_01\",\n  \"description\": \"The encoder is overloaded as media_cpu_usage_percent is 97.0, media_fps is 18.0, and media_encoding_latency_ms is 190.0, while media_packet_loss_percent is 0.1 and media_network_latency_ms is 30.0, and media_encoder_status is 1.0.\",\n  \"confidence\": 0.95\n}"
+    },
+    "agreement": true,
+    "fault_class": "encoder_overload",
+    "confidence": 0.95,
+    "summary": "encoder_overload on encoder_01. Infra (conf 0.95): media_pipeline_health 0.0, media_encoder_status 1.0, media_fps 18.0, media_cpu_usage_percent 97.0. Vision (conf 0.95): MACROBLOCKING -- The video displays severe macroblocking and pixelation across the entire frame, making the image appear blocky and distorted. Video symptom corroborates the telemetry fault class. Overall evidence confidence 0.95.",
+    "validation_passed": true,
+    "validation_errors": []
+  },
+  "precedent": [
+    {
+      "kb_id": "incident-e3adfe780db64059b22482fe3242f303",
+      "fault_class": "encoder_overload",
+      "action_taken": "RESTART_ENCODER",
+      "outcome": "resolved",
+      "similarity": 0.8882,
+      "summary": "encoder_overload on encoder_01. Infra (conf 1.0): media_pipeline_health 0.0, media_encoder_status 1.0, media_fps 18.0, media_cpu_usage_percent 97.0. Vision (conf 0.95): MACROBLOCKING -- The video shows a family interacting, but it is heavily affected by severe blocky compression artifacts across the entire frame. Video symptom corroborates the telemetry fault class. Overall evidence confidence 0.95. Verified RECOVERED after RESTART_ENCODER on encoder_01; telemetry stayed healthy for 15.0s and video was normal."
+    },
+    {
+      "kb_id": "incident-751566ba55b04eaaa89f52e4a82d31f3",
+      "fault_class": "encoder_overload",
+      "action_taken": "RESTART_ENCODER",
+      "outcome": "resolved",
+      "similarity": 0.8776,
+      "summary": "encoder_overload on encoder_01. Infra (conf 0.95): media_memory_usage_percent 88.0, media_fps 18.0, media_packet_loss_percent 0.1, media_dropped_frames_percent 8.2. Vision (conf 0.95): MACROBLOCKING -- The video shows a family interacting, but it is heavily affected by severe blocky compression artifacts across the entire frame. Video symptom corroborates the telemetry fault class. Overall evidence confidence 0.95. Verified RECOVERED after RESTART_ENCODER on encoder_01; telemetry stayed healthy for 15.0s and video was normal."
+    },
+    {
+      "kb_id": "kb-0001",
+      "fault_class": "encoder_overload",
+      "action_taken": "RESTART_ENCODER",
+      "outcome": "resolved",
+      "similarity": 0.8766,
+      "summary": "encoder_overload on encoder_01. Infra (conf 0.95): media_cpu_usage_percent 97.0, media_fps 18.0, media_encoding_latency_ms 190.0. Vision (conf 0.95): MACROBLOCKING -- heavy blocky compression artifacts across the whole frame. Video symptom corroborates the telemetry fault class. Resolved by RESTART_ENCODER in 45s."
+    }
+  ],
+  "proposal": {
+    "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff",
+    "proposed_at": "2026-09-02T23:24:38.061040Z",
+    "action": "RESTART_ENCODER",
+    "rationale": "The current encoder_overload on encoder_01 with high CPU usage (97%) and MACROBLOCKING vision symptom perfectly matches past incidents (e.g., incident-e3adfe780db64059b22482fe3242f303, kb-0001) which were successfully resolved by RESTART_ENCODER.",
+    "confidence": 0.95,
+    "model": "gemini-2.5-flash",
+    "similar_incident_ids": [
+      "incident-e3adfe780db64059b22482fe3242f303",
+      "incident-751566ba55b04eaaa89f52e4a82d31f3",
+      "kb-0001"
+    ],
+    "precedent_summary": "RETRIEVED PRECEDENT  (3 past incidents above the RAG relevance threshold)\n  - incident-e3adfe780db64059b22482fe3242f303  similarity 0.8882  |  encoder_overload  |  action_taken RESTART_ENCODER -> resolved\n    encoder_overload on encoder_01. Infra (conf 1.0): media_pipeline_health 0.0, media_encoder_status 1.0, media_fps 18.0, media_cpu_usage_percent 97.0. Vision (conf 0.95): MACROBLOCKING -- The video shows a family interacting, but it is heavily affected by severe blocky compression artifacts across the entire frame. Video symptom corroborates the telemetry fault class. Overall evidence confidence 0.95. Verified RECOVERED after RESTART_ENCODER on encoder_01; telemetry stayed healthy for 15.0s and video was normal.\n  - incident-751566ba55b04eaaa89f52e4a82d31f3  similarity 0.8776  |  encoder_overload  |  action_taken RESTART_ENCODER -> resolved\n    encoder_overload on encoder_01. Infra (conf 0.95): media_memory_usage_percent 88.0, media_fps 18.0, media_packet_loss_percent 0.1, media_dropped_frames_percent 8.2. Vision (conf 0.95): MACROBLOCKING -- The video shows a family interacting, but it is heavily affected by severe blocky compression artifacts across the entire frame. Video symptom corroborates the telemetry fault class. Overall evidence confidence 0.95. Verified RECOVERED after RESTART_ENCODER on encoder_01; telemetry stayed healthy for 15.0s and video was normal.\n  - kb-0001  similarity 0.8766  |  encoder_overload  |  action_taken RESTART_ENCODER -> resolved\n    encoder_overload on encoder_01. Infra (conf 0.95): media_cpu_usage_percent 97.0, media_fps 18.0, media_encoding_latency_ms 190.0. Vision (conf 0.95): MACROBLOCKING -- heavy blocky compression artifacts across the whole frame. Video symptom corroborates the telemetry fault class. Resolved by RESTART_ENCODER in 45s.",
+    "raw_response": "{\"action\": \"RESTART_ENCODER\", \"rationale\": \"The current encoder_overload on encoder_01 with high CPU usage (97%) and MACROBLOCKING vision symptom perfectly matches past incidents (e.g., incident-e3adfe780db64059b22482fe3242f303, kb-0001) which were successfully resolved by RESTART_ENCODER.\", \"confidence\": 0.95}"
+  },
+  "safety_decision": {
+    "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff",
+    "evaluated_at": "2026-09-02T23:24:40.261515Z",
+    "action": "RESTART_ENCODER",
+    "verdict": "ALLOW",
+    "checks": [
+      {
+        "name": "allow_list",
+        "passed": true,
+        "detail": "RESTART_ENCODER is explicitly permitted"
+      },
+      {
+        "name": "incident_match",
+        "passed": true,
+        "detail": "proposal, evidence, and incident IDs match"
+      },
+      {
+        "name": "compatibility",
+        "passed": true,
+        "detail": "RESTART_ENCODER is approved for encoder_overload"
+      },
+      {
+        "name": "approved_target",
+        "passed": true,
+        "detail": "target 'encoder_01' is approved"
+      },
+      {
+        "name": "evidence_confidence",
+        "passed": true,
+        "detail": "evidence 0.950 and proposal 0.950 meet 0.800"
+      },
+      {
+        "name": "blast_radius",
+        "passed": true,
+        "detail": "action radius component is within stream"
+      },
+      {
+        "name": "action_budget",
+        "passed": true,
+        "detail": "1 of 2 actions attempted"
+      },
+      {
+        "name": "cooldown",
+        "passed": true,
+        "detail": "23303.0s elapsed; requires 15.0s"
+      }
+    ],
+    "block_reason": null,
+    "idempotency_key": "safety-f0b52ecf9e4112c1a7fcf7c7"
+  },
+  "proposal_history": [],
+  "safety_decision_history": [],
+  "execution": {
+    "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff",
+    "executed_at": "2026-09-02T23:24:44.038192Z",
+    "action": "RESTART_ENCODER",
+    "idempotency_key": "safety-f0b52ecf9e4112c1a7fcf7c7",
+    "success": true,
+    "detail": "encoder restarted in 0.25s"
+  },
+  "verification": {
+    "incident_id": "de95cd65e6fc4e3f9a99db17c9fcf9ff",
+    "verified_at": "2026-09-02T23:25:19.598628Z",
+    "action": "RESTART_ENCODER",
+    "verdict": "RECOVERED",
+    "recovered": true,
+    "telemetry_ok": true,
+    "video_ok": true,
+    "health_value": 1,
+    "stable_window_seconds": 15.023515332955867,
+    "samples": [
+      {
+        "media_pipeline_health": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_dropped_frames_percent": 0.2,
+        "elapsed_seconds": 0.0,
+        "media_encoder_status": 1.0,
+        "sampled_at_epoch": 1788391500.50023,
+        "media_fps": 30.0
+      },
+      {
+        "media_pipeline_health": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_dropped_frames_percent": 0.2,
+        "elapsed_seconds": 3.0190850419458,
+        "media_encoder_status": 1.0,
+        "sampled_at_epoch": 1788391503.51825,
+        "media_fps": 30.0
+      },
+      {
+        "media_pipeline_health": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_dropped_frames_percent": 0.2,
+        "elapsed_seconds": 6.039595500100404,
+        "media_encoder_status": 1.0,
+        "sampled_at_epoch": 1788391506.543907,
+        "media_fps": 30.0
+      },
+      {
+        "media_pipeline_health": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_dropped_frames_percent": 0.2,
+        "elapsed_seconds": 9.069637667154893,
+        "media_encoder_status": 1.0,
+        "sampled_at_epoch": 1788391509.580925,
+        "media_fps": 30.0
+      },
+      {
+        "media_pipeline_health": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_dropped_frames_percent": 0.2,
+        "elapsed_seconds": 12.109589375089854,
+        "media_encoder_status": 1.0,
+        "sampled_at_epoch": 1788391512.604629,
+        "media_fps": 30.0
+      },
+      {
+        "media_pipeline_health": 1.0,
+        "media_packet_loss_percent": 0.1,
+        "media_dropped_frames_percent": 0.2,
+        "elapsed_seconds": 15.005027417093515,
+        "media_encoder_status": 1.0,
+        "sampled_at_epoch": 1788391515.497598,
+        "media_fps": 30.0
+      }
+    ],
+    "failed_checks": [],
+    "vision_recheck": {
+      "source": "vision",
+      "observed_at": "2026-09-02T23:25:19.597726Z",
+      "frame_captured_at": "2026-09-02T23:25:15.498101Z",
+      "symptom": "NORMAL",
+      "description": "The video shows a man and a boy interacting on the floor, with clear movement between frames and no visible defects.",
+      "confidence": 1.0,
+      "model": "gemini-2.5-flash",
+      "raw_response": "{\n  \"symptom\": \"NORMAL\",\n  \"description\": \"The video shows a man and a boy interacting on the floor, with clear movement between frames and no visible defects.\",\n  \"confidence\": 1\n}"
+    }
+  },
+  "execution_history": [],
+  "verification_history": [],
+  "fallback_attempted": false,
+  "automation_failure_reason": null,
+  "actions_attempted": [
+    "RESTART_ENCODER",
+    "RESTART_ENCODER"
+  ],
+  "attempt_count": 2,
+  "idempotency_key": "safety-f0b52ecf9e4112c1a7fcf7c7",
+  "report_sent": true,
+  "report_claimed": false,
+  "report_error": null,
+  "kb_writeback_id": "incident-de95cd65e6fc4e3f9a99db17c9fcf9ff",
+  "kb_writeback_error": null,
+  "notes": [
+    "control execution RESTART_ENCODER: success=True; encoder restarted in 0.25s",
+    "re-observed anomaly d8777b9061b34b0fb8fe97cbc0ae3679 at 2026-09-02T23:23:33.611716+00:00 (breach_count=6)",
+    "re-observed anomaly 0fe8eb2347c3417a928b08e11ab9c038 at 2026-09-02T23:23:36.082838+00:00 (breach_count=6)",
+    "re-observed anomaly ef6903dadfa04b598033af2424d4fa68 at 2026-09-02T23:23:53.589071+00:00 (breach_count=6)",
+    "control execution RESTART_ENCODER: success=True; encoder restarted in 0.25s",
+    "recovery positively verified in both domains",
+    "final incident report sent to Slack",
+    "KB precedent created: incident-de95cd65e6fc4e3f9a99db17c9fcf9ff",
+    "incident lifecycle closed"
+  ]
+}

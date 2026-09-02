@@ -17,6 +17,7 @@ from typing import Callable
 
 from detector import PROMETHEUS_URL, query_health, query_raw_snapshot
 from incident_recorder import IncidentRecorder
+from observability import log_event
 from models import (
     Incident,
     IncidentStatus,
@@ -294,6 +295,7 @@ def run_for_incident(
     settle_sleep: Callable[[float], None] = time.sleep,
 ) -> VerificationResult:
     recorder = recorder or IncidentRecorder()
+    log_event("verify", incident_id, "verify", "started")
     incident = recorder.load(incident_id)
     incident.status = IncidentStatus.VERIFYING
     incident.current_step = "verify_settle"
@@ -322,6 +324,8 @@ def run_for_incident(
         )
         incident.verification = result
         recorder.save(incident)
+        log_event("verify", incident_id, "verify", "cannot_verify",
+                  action=result.action, detail="; ".join(result.failed_checks))
         return result
 
     incident.current_step = "verify"
@@ -331,6 +335,8 @@ def run_for_incident(
     incident.status = IncidentStatus.VERIFYING
     incident.current_step = "verify"
     recorder.save(incident)
+    log_event("verify", incident_id, "verify", result.verdict.value.lower(),
+              action=result.action, detail="; ".join(result.failed_checks) or "both domains healthy")
     return result
 
 

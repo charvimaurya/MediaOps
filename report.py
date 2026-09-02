@@ -18,6 +18,7 @@ import certifi
 
 from incident_recorder import IncidentRecorder
 from models import Incident
+from observability import log_event
 
 
 class ReportError(RuntimeError):
@@ -97,6 +98,7 @@ def run_report(
     webhook_url: str | None = None,
 ) -> dict[str, str | bool]:
     active_recorder = recorder or IncidentRecorder()
+    log_event("report", incident_id, "report", "started")
     url = webhook_url if webhook_url is not None else os.environ.get("SLACK_WEBHOOK_URL")
     if not url:
         raise ReportError("SLACK_WEBHOOK_URL is missing")
@@ -110,6 +112,7 @@ def run_report(
         incident.report_error = None
         incident.notes.append("final incident report sent to Slack")
         active_recorder.save(incident)
+        log_event("report", incident_id, "report", "sent", detail="Slack report sent")
         return {"incident_id": incident_id, "sent": True, "message": message}
     except Exception as exc:
         try:
@@ -121,6 +124,8 @@ def run_report(
             raise ReportError(
                 f"report failed: {exc}; could not persist failure: {persist_exc}"
             ) from exc
+        log_event("report", incident_id, "report", "failed",
+                  detail=f"{type(exc).__name__}: {exc}")
         raise ReportError(f"report failed: {type(exc).__name__}: {exc}") from exc
 
 

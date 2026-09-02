@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from models import FaultClass, IncidentEvidence, InfraFinding, VisionFinding, VisionSymptom
+from observability import log_event
 
 # --------------------------------------------------------------------------- #
 # Config
@@ -110,7 +111,7 @@ def aggregate(
     base = min(vision.confidence, infra.confidence)
     overall = base if agreement else round(base * ABSTAIN_CONFIDENCE_FACTOR, 3)
 
-    return IncidentEvidence(
+    result = IncidentEvidence(
         incident_id=incident_id,
         vision=vision,
         infra=infra,
@@ -121,6 +122,9 @@ def aggregate(
         validation_passed=True,
         validation_errors=[],
     )
+    log_event("aggregator", incident_id, "aggregate", "completed",
+              detail=f"agreement={agreement}; confidence={overall:.3f}")
+    return result
 
 
 # --------------------------------------------------------------------------- #

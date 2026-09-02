@@ -16,6 +16,7 @@ from google.cloud import firestore
 import knowledge_base
 from incident_recorder import IncidentRecorder
 from models import Incident, VerificationVerdict
+from observability import log_event
 
 
 class KBWritebackError(RuntimeError):
@@ -99,6 +100,7 @@ def run_writeback(
     writer: Callable[[IncidentRecorder, dict], tuple[dict, bool]] = _write_once,
 ) -> dict:
     active_recorder = recorder or IncidentRecorder()
+    log_event("kb_writeback", incident_id, "kb_writeback", "started")
     try:
         incident = active_recorder.load(incident_id)
         base = build_precedent(incident)
@@ -119,6 +121,8 @@ def run_writeback(
             f"KB precedent {'created' if created else 'already existed'}: {base['kb_id']}"
         )
         active_recorder.save(incident)
+        log_event("kb_writeback", incident_id, "kb_writeback",
+                  "created" if created else "already_exists", detail=base["kb_id"])
         return {"created": created, "precedent": stored}
     except Exception as exc:
         try:
@@ -128,6 +132,7 @@ def run_writeback(
         except Exception:
             pass
         if isinstance(exc, (KeyError, KBWritebackError)):
+            log_event("kb_writeback", incident_id, "kb_writeback", "refused", detail=str(exc))
             raise
         raise KBWritebackError(f"writeback failed: {type(exc).__name__}: {exc}") from exc
 
