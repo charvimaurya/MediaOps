@@ -270,6 +270,44 @@ class _InfraResponse(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+# Gemini's component name is advisory free text. Convert only known aliases to
+# the system's canonical identifiers; leave unknown values untouched so the
+# deterministic Safety Gate can reject them.
+_CANONICAL_COMPONENT_ALIASES = {
+    "encoder_01": frozenset({
+        "encoder_01",
+        "encoder",
+        "encoder_1",
+        "encoder 1",
+        "encoder-1",
+        "the encoder",
+        "primary encoder",
+        "primary_encoder",
+        "primary-encoder",
+    }),
+    "network path": frozenset({
+        "network path",
+        "network_path",
+        "network-path",
+        "network",
+        "the network",
+        "network link",
+        "network_link",
+        "network-link",
+    }),
+    "n/a": frozenset({"n/a", "na", "unknown", "none"}),
+}
+
+
+def _normalize_affected_component(value: str) -> str:
+    """Return a canonical ID for a known alias, otherwise preserve ``value``."""
+    candidate = value.strip().lower()
+    for canonical, aliases in _CANONICAL_COMPONENT_ALIASES.items():
+        if candidate in aliases:
+            return canonical
+    return value
+
+
 _INSTRUCTION = """You are the read-only MediaOps Infra Agent for a live video pipeline.
 You are given REAL telemetry summaries (latest / min / max / mean over a bounded
 window) for a set of `media_*` metrics. Interpret ONLY these numbers.
@@ -290,7 +328,12 @@ use `unknown` with low confidence. Do not recommend any remediation.
 
 Fields:
 - fault_class: one of encoder_overload, network_degradation, encoder_failure, unknown
-- affected_component: e.g. "encoder_01" or "network path"
+- affected_component: use EXACTLY one canonical component ID:
+  - encoder_overload or encoder_failure -> "encoder_01"
+  - network_degradation -> "network path"
+  - unknown -> "n/a"
+  Never use a generic description such as "encoder", "the encoder", or "network",
+  and never use a Prometheus label key as the component ID.
 - description: ONE sentence citing the actual numbers you were given
 - confidence: a number between 0 and 1
 
@@ -302,7 +345,7 @@ _RETRY_SUFFIX = """
 YOUR PREVIOUS RESPONSE FAILED VALIDATION: {error}
 Return ONLY a JSON object with exactly these four keys and nothing else:
   "fault_class": one of encoder_overload, network_degradation, encoder_failure, unknown
-  "affected_component": a short string
+  "affected_component": exactly "encoder_01", "network path", or "n/a" as specified above
   "description": a short string
   "confidence": a number between 0 and 1
 """
@@ -419,7 +462,7 @@ def analyze_infra(
                     ctx, attempt, parsed.fault_class.value, parsed.confidence)
         return InfraFinding(
             fault_class=parsed.fault_class,
-            affected_component=parsed.affected_component,
+            affected_component=_normalize_affected_component(parsed.affected_component),
             description=parsed.description,
             supporting_metrics={m: s["latest"] for m, s in metrics.items()},
             confidence=parsed.confidence,

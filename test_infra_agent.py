@@ -21,6 +21,50 @@ from models import FaultClass, InfraFinding
 UTC = timezone.utc
 
 
+# ---- 0. deterministic component-name normalization -------------------- #
+print("0. affected_component aliases normalize to canonical system IDs")
+for alias in (
+    "encoder_01", "encoder", "encoder_1", "encoder 1", "encoder-1",
+    "the encoder", "primary encoder", "primary_encoder", "primary-encoder",
+    " Encoder ",
+):
+    assert infra_agent._normalize_affected_component(alias) == "encoder_01", alias
+for alias in (
+    "network path", "network_path", "network-path", "network", "the network",
+    "network link", "network_link", "network-link", " NETWORK_PATH ",
+):
+    assert infra_agent._normalize_affected_component(alias) == "network path", alias
+for alias in ("n/a", "na", "unknown", "none", " NONE "):
+    assert infra_agent._normalize_affected_component(alias) == "n/a", alias
+assert infra_agent._normalize_affected_component("database_01") == "database_01"
+print("   OK: known aliases canonicalized; unknown target preserved")
+
+
+print("\n0b. analyze_infra normalizes Gemini target 'encoder' to 'encoder_01'")
+_normalization_real_query = infra_agent.query_metrics
+_normalization_real_call = infra_agent._call_gemini
+try:
+    infra_agent.query_metrics = lambda start, end: {
+        "media_cpu_usage_percent": {
+            "latest": 97.0, "min": 95.0, "max": 99.0, "mean": 97.0, "points": 3,
+        },
+        "media_fps": {
+            "latest": 18.0, "min": 17.0, "max": 19.0, "mean": 18.0, "points": 3,
+        },
+    }
+    infra_agent._call_gemini = lambda summary, instruction: (
+        '{"fault_class":"encoder_overload","affected_component":"encoder",'
+        '"description":"CPU 97 and FPS 18 indicate overload","confidence":0.95}'
+    )
+    normalized = infra_agent.analyze_infra()
+    assert isinstance(normalized, InfraFinding), normalized
+    assert normalized.affected_component == "encoder_01", normalized.affected_component
+    print(f"   OK: returned affected_component={normalized.affected_component!r}")
+finally:
+    infra_agent.query_metrics = _normalization_real_query
+    infra_agent._call_gemini = _normalization_real_call
+
+
 # ---- 1. window guard --------------------------------------------------- #
 print("1. query_metrics rejects an out-of-bounds window")
 now = datetime.now(UTC)

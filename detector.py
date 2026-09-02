@@ -247,4 +247,18 @@ class Detector:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    Detector().run_forever()
+
+    # Running the Detector standalone should produce a real, durable incident --
+    # not just a printout. Wire the emitted event straight into the Incident
+    # Recorder (which dedups against any existing active incident for the same
+    # fault). Imported here so `import detector` stays free of Firestore.
+    from incident_recorder import IncidentRecorder
+
+    _recorder = IncidentRecorder()
+
+    def _record_and_print(event: AnomalyEvent) -> None:
+        print_anomaly(event)
+        incident_id = _recorder.record(event)
+        print(f">>> recorded to Firestore: incident {incident_id}\n")
+
+    Detector(on_anomaly=_record_and_print).run_forever()
