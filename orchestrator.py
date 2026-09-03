@@ -22,7 +22,7 @@ from aggregator import AggregationError, aggregate
 from control_plane import execute_incident
 from fallback import FallbackStopped, run_fallback
 from incident_recorder import IncidentRecorder
-from infra_agent import analyze_infra
+from agents.infra_agent import analyze_infra
 from kb_writeback import run_writeback
 from knowledge_base import retrieve
 from models import (
@@ -36,12 +36,12 @@ from models import (
     VerificationVerdict,
     VisionFinding,
 )
-from remediation_agent import propose_remediation
+from agents.remediation_agent import propose_remediation
 from report import run_report
 from observability import log_event, record_event
 from safety_gate import SafetyConfig, run_for_incident as run_safety_gate
 from verify_recovery import run_for_incident as run_verification
-from vision_agent import analyze_frame
+from agents.vision_agent import analyze_frame
 
 
 logger = logging.getLogger("orchestrator")
@@ -193,6 +193,8 @@ class Orchestrator:
             vision, infra = self._parallel_diagnosis(incident)
             incident.vision = vision
             incident.infra = infra
+            # record_event builds the durable timeline; save() commits these
+            # independent witness results and their breadcrumbs to Firestore.
             record_event(incident, "vision", "diagnose", "completed" if vision else "no_finding",
                          detail=vision.symptom.value if vision else "Vision returned no finding")
             record_event(incident, "infra", "diagnose", "completed" if infra else "no_finding",
@@ -353,6 +355,8 @@ class Orchestrator:
     def _enter(self, incident: Incident, status: IncidentStatus, step: str) -> None:
         incident.status = status
         incident.current_step = step
+        # Persist the transition before doing step work, so an interrupted run
+        # still shows exactly where orchestration stopped.
         record_event(incident, "orchestrator", step, "started", status=status)
         self._recorder.save(incident)
         print(f"-> {status.value}")
@@ -370,6 +374,8 @@ class Orchestrator:
         incident.terminal_step = step
         incident.terminal_reason = reason
         incident.notes.append(f"{status.value} during {step}: {reason}")
+        # Terminal diagnostics are first-class Firestore fields and a timeline
+        # event, rather than being available only in ephemeral process logs.
         record_event(incident, "orchestrator", step, status.value.lower(), status=status, detail=reason)
         self._recorder.save(incident)
         print(f"-> {status.value}: {reason}")
@@ -385,6 +391,8 @@ class Orchestrator:
         incident.notes.append(
             f"FAILED during {failed_step}: {type(exc).__name__}: {exc}"
         )
+        # Fail-closed errors retain both the failed step and human-readable cause
+        # so trace.py can explain the stop without access to the original console.
         record_event(incident, "orchestrator", failed_step, "failed",
                      status=IncidentStatus.FAILED, detail=incident.terminal_reason)
         self._recorder.save(incident)

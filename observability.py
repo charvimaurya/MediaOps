@@ -21,6 +21,8 @@ def log_event(
 ) -> None:
     """Emit one grep-friendly JSON log line with the same fields everywhere."""
     action_value = action.value if isinstance(action, RemediationAction) else action
+    # This is the process-level debugging record.  Keeping the same JSON keys in
+    # every component makes one incident's distributed journey grep-friendly.
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "component": component,
@@ -52,6 +54,8 @@ def record_event(
         action=action,
         detail=detail,
     )
+    # This is the durable counterpart to the process log.  The caller persists
+    # the updated Incident to Firestore, so the timeline survives process exits.
     incident.lifecycle_events.append(event)
     log_event(
         component,

@@ -71,7 +71,7 @@ def read_metrics() -> dict[str, float]:
 
 def read_healthy_video(incident: Incident, *, fault: str) -> VisionFinding | None:
     """Load the AI observer only when the independent video check is reached."""
-    from vision_agent import analyze_frame
+    from agents.vision_agent import analyze_frame
 
     return analyze_frame(incident, fault=fault)
 

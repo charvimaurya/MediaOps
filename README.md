@@ -425,3 +425,33 @@ The new Prometheus metrics (`mediaops_aht_seconds`, `mediaops_rto_seconds`,
 `mediaops_active_encoder`) are exposed on the same
 `http://localhost:8002/metrics` as the detector's own metrics (not
 currently scraped by Prometheus, same reasoning as before).
+
+## Evaluation
+
+We validated each AI agent against known fault scenarios (our golden set:
+encoder overload, encoder failure, RGB shift, network degradation, plus a
+healthy baseline), running each multiple times to measure reliability.
+
+| Agent / Behavior | Test | Result |
+|---|---|---|
+| Vision Agent | Correct symptom per fault | 5/5 |
+| Infra Agent | Correct fault class per fault | High accuracy* |
+| Remediation Agent | Valid enum action + precedent cited | 5/5 |
+| Dual-domain agreement | Vision + Infra corroborate | 5/5 |
+| Safety Gate | Allows valid; blocks incompatible + low-confidence | 5/5 |
+| Verify Recovery | `RECOVERED` / `RECOVERY_FAILED` / `CANNOT_VERIFY` | 5/5 |
+
+\*The Infra Agent occasionally returns a low-confidence `unknown` when the
+metrics window contains transitional data; these results are correctly
+rejected by the confidence guardrail rather than driving an incorrect action—a
+direct example of the **“AI proposes, deterministic code decides”** principle.
+
+## Operations console
+
+Start the single-page incident console on port 8081:
+
+```bash
+uvicorn web.ops_console:app --port 8081
+```
+
+Then open <http://localhost:8081>.

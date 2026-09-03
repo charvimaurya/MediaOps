@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MediaOps CoPilot</title>
+  <style>
+    :root { color-scheme: dark; --bg:#090d14; --panel:#111824; --line:#263244; --muted:#8fa1b8; --text:#edf4ff; --blue:#438cff; --green:#35c98b; --red:#ff5c6c; --amber:#f5b942; }
+    * { box-sizing:border-box } body { margin:0; background:radial-gradient(circle at 15% 0,#17233a 0,transparent 35%),var(--bg); color:var(--text); font:14px/1.5 Inter,ui-sans-serif,system-ui,sans-serif }
+    header { max-width:1280px; margin:auto; padding:28px 28px 18px; display:flex; align-items:center; justify-content:space-between }
+    h1 { font-size:21px; margin:0; letter-spacing:.2px } .brand { display:flex; gap:12px; align-items:center } .mark { width:11px; height:11px; border-radius:3px; background:var(--blue); box-shadow:0 0 20px var(--blue) }
+    .live { color:var(--muted); display:flex; align-items:center; gap:8px } .dot { width:8px; height:8px; border-radius:50%; background:var(--green) }
+    main { max-width:1280px; margin:auto; padding:0 28px 40px; display:grid; gap:18px }
+    .panel { background:rgba(17,24,36,.94); border:1px solid var(--line); border-radius:12px; box-shadow:0 18px 50px rgba(0,0,0,.18) }
+    .controls { padding:20px } .section-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px } h2 { margin:0; font-size:14px; text-transform:uppercase; letter-spacing:.11em; color:#bcc9da }
+    .buttons { display:flex; flex-wrap:wrap; gap:10px } button { border:1px solid #344258; background:#182233; color:var(--text); padding:10px 14px; border-radius:7px; cursor:pointer; font-weight:650 } button:hover { border-color:var(--blue); background:#1d2b42 } button:disabled { opacity:.5; cursor:wait } button.danger { border-color:#65333b; color:#ffb8c0 } button.reset { margin-left:auto; border-color:#385949; color:#a9efcf }
+    .metrics { display:flex; gap:20px; flex-wrap:wrap; color:var(--muted); font-variant-numeric:tabular-nums } .metrics strong { color:var(--text); margin-left:5px }
+    .incident { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(300px,.8fr) } .timeline-wrap { padding:22px; border-right:1px solid var(--line) } .summary { padding:22px }
+    .incident-title { display:flex; justify-content:space-between; gap:20px; align-items:start; margin-bottom:20px } .id { font-family:ui-monospace,SFMono-Regular,monospace; color:var(--muted); margin-top:3px; word-break:break-all }
+    .badge { display:inline-flex; padding:5px 9px; border-radius:999px; font-size:12px; font-weight:800; letter-spacing:.04em; background:#263449; color:#c9d8ed } .badge.allow,.badge.recovered,.badge.closed,.badge.agree { background:#123d31; color:#72e7b3; border:1px solid #256b53 } .badge.block,.badge.failed,.badge.disagree { background:#482029; color:#ff9ca7; border:1px solid #7e3441 } .badge.pending { background:#443718; color:#ffd675; border:1px solid #705b25 }
+    .timeline { list-style:none; padding:0; margin:0 } .event { display:grid; grid-template-columns:18px 1fr; gap:12px; min-height:64px } .rail { position:relative } .rail:before { content:""; position:absolute; left:6px; top:17px; bottom:-7px; width:1px; background:#304058 } .event:last-child .rail:before { display:none } .node { position:absolute; top:7px; width:13px; height:13px; border:3px solid var(--panel); background:var(--blue); border-radius:50%; box-shadow:0 0 0 1px #496282 }
+    .event-main { padding-bottom:15px } .event-top { display:flex; justify-content:space-between; gap:10px } .event-name { font-weight:700 } time { color:#71849d; font-size:12px } .detail { color:var(--muted); margin-top:3px }
+    .cards { display:grid; gap:12px } .card { padding:14px; background:#0c121c; border:1px solid #202c3d; border-radius:9px } .label { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.1em; margin-bottom:6px } .value { font-weight:750 } .sub { color:var(--muted); margin-top:4px }
+    .guardrail { border-width:1px; border-color:#315884; background:linear-gradient(145deg,#101c2d,#0c121c) } .empty { padding:70px 20px; text-align:center; color:var(--muted) } .error { color:#ff9ca7; margin-top:10px }
+    @media(max-width:850px){ .incident{grid-template-columns:1fr}.timeline-wrap{border-right:0;border-bottom:1px solid var(--line)} button.reset{margin-left:0} }
+  </style>
+</head>
+<body>
+  <header><div class="brand"><span class="mark"></span><h1>MediaOps CoPilot</h1></div><div class="live"><span class="dot"></span><span id="pollState">Live · polling every 3s</span></div></header>
+  <main>
+    <section class="panel controls">
+      <div class="section-head"><h2>Fault controls</h2><div class="metrics" id="metrics">Simulator connecting…</div></div>
+      <div class="buttons">
+        <button data-fault="encoder-overload" class="danger">Inject Encoder Overload</button>
+        <button data-fault="encoder-failure" class="danger">Inject Encoder Failure</button>
+        <button data-fault="network-degradation" class="danger">Inject Network Degradation</button>
+        <button data-fault="reset" class="reset">Reset to Healthy</button>
+      </div>
+      <div id="actionMessage" class="error"></div>
+    </section>
+    <section class="panel" id="incidentPanel"><div class="empty">Waiting for a Firestore incident…</div></section>
+  </main>
+<script>
+const $=s=>document.querySelector(s), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let followedId=null, injectedAt=0;
+function badge(value,kind=''){ return `<span class="badge ${kind||String(value).toLowerCase()}">${esc(value)}</span>` }
+function artifactEvents(i){
+  const rows=[{timestamp:i.anomaly?.detected_at,component:'detector',step:'detected',outcome:i.anomaly?.reason}];
+  for(const [obj,key,component,step] of [[i.vision,'observed_at','vision','diagnosis'],[i.infra,'observed_at','infra','diagnosis'],[i.evidence,'aggregated_at','aggregator','corroboration'],[i.proposal,'proposed_at','remediation','proposal'],[i.safety_decision,'evaluated_at','safety_gate','gate'],[i.execution,'executed_at','control_plane','execution'],[i.verification,'verified_at','verify','verification']]) if(obj) rows.push({timestamp:obj[key],component,step,outcome:''});
+  return rows.filter(x=>x.timestamp);
+}
+function render(i){
+  const events=(i.lifecycle_events?.length?i.lifecycle_events:artifactEvents(i)).slice().sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+  const timeline=events.map(e=>`<li class="event"><div class="rail"><span class="node"></span></div><div class="event-main"><div class="event-top"><span class="event-name">${esc(e.step)} · ${esc(e.outcome)}</span><time>${new Date(e.timestamp).toLocaleTimeString()}</time></div><div class="detail">${esc(e.component)}${e.action?' · '+esc(e.action):''}${e.detail?' — '+esc(e.detail):''}</div></div></li>`).join('');
+  const agreed=i.evidence?.agreement, gate=i.safety_decision, verify=i.verification;
+  $('#incidentPanel').innerHTML=`<div class="incident"><div class="timeline-wrap"><div class="incident-title"><div><h2>Incident lifecycle</h2><div class="id">${esc(i.incident_id)}</div></div>${badge(i.status)}</div><ol class="timeline">${timeline||'<li class="empty">No lifecycle events yet</li>'}</ol></div><aside class="summary"><div class="section-head"><h2>Decision record</h2></div><div class="cards">
+    <div class="card"><div class="label">Independent diagnosis</div><div class="value">Vision: ${esc(i.vision?.symptom||'Pending')}</div><div class="sub">Infra: ${esc(i.infra?.fault_class||'Pending')} · ${esc(i.infra?.affected_component||'')}</div></div>
+    <div class="card guardrail"><div class="label">Dual-domain corroboration</div><div class="value">${agreed===undefined?badge('PENDING','pending'):badge(agreed?'CORROBORATED':'NOT CORROBORATED',agreed?'agree':'disagree')}</div></div>
+    <div class="card"><div class="label">Proposed action</div><div class="value">${esc(i.proposal?.action||'Pending')}</div><div class="sub">${esc(i.proposal?.rationale||'')}</div></div>
+    <div class="card guardrail"><div class="label">Safety Gate</div><div class="value">${gate?badge(gate.verdict,gate.verdict==='ALLOW'?'allow':'block'):badge('PENDING','pending')}</div><div class="sub">${esc(gate?.block_reason||(gate?'All deterministic checks passed':'Awaiting decision'))}</div></div>
+    <div class="card"><div class="label">Execution</div><div class="value">${i.execution?(i.execution.success?'Succeeded':'Failed'):'Pending'}</div><div class="sub">${esc(i.execution?.detail||'')}</div></div>
+    <div class="card"><div class="label">Verification</div><div class="value">${verify?badge(verify.verdict):badge('PENDING','pending')}</div><div class="sub">${esc(verify?.failed_checks?.join('; ')||(verify?'Both evidence domains confirmed':'Execution success is not recovery'))}</div></div>
+    <div class="card"><div class="label">Final outcome</div><div class="value">${esc(i.status)}</div><div class="sub">${esc(i.terminal_reason||'')}</div></div>
+  </div></aside></div>`;
+}
+async function json(url,options){ const r=await fetch(url,options); if(!r.ok) throw new Error((await r.json()).detail||r.statusText); return r.json() }
+async function poll(){
+  try{
+    const state=await json('/api/simulator'); $('#metrics').innerHTML=`Health <strong>${state.encoder_status===1&&state.fps>=24&&state.dropped_frames<5&&state.packet_loss<5?'HEALTHY':'DEGRADED'}</strong> FPS <strong>${esc(state.fps)}</strong> CPU <strong>${esc(state.cpu_usage)}%</strong> Mode <strong>${esc(state.failure_mode)}</strong>`;
+    const data=await json(followedId?`/api/incidents/${followedId}`:'/api/incidents/latest');
+    if(data.incident && (!injectedAt || new Date(data.incident.updated_at).getTime()>=injectedAt)){
+      followedId=data.incident.incident_id; injectedAt=0; render(data.incident);
+    }
+    $('#pollState').textContent='Live · updated '+new Date().toLocaleTimeString();
+  }catch(e){ $('#pollState').textContent='Polling error'; $('#actionMessage').textContent=e.message }
+}
+document.querySelectorAll('button[data-fault]').forEach(button=>button.onclick=async()=>{
+  document.querySelectorAll('button').forEach(b=>b.disabled=true); $('#actionMessage').textContent='';
+  if(button.dataset.fault!=='reset'){
+    followedId=null; injectedAt=Date.now();
+    $('#incidentPanel').innerHTML='<div class="empty">Fault accepted. Waiting for Detector to record the incident…</div>';
+  }
+  try{ const result=await json('/api/fault/'+button.dataset.fault,{method:'POST'}); $('#actionMessage').style.color='var(--green)'; $('#actionMessage').textContent=result.status||result.detail||'Command accepted'; await poll() }
+  catch(e){ $('#actionMessage').style.color='var(--red)'; $('#actionMessage').textContent=e.message }
+  finally{ document.querySelectorAll('button').forEach(b=>b.disabled=false) }
+});
+poll(); setInterval(poll,3000);
+</script>
+</body>
+</html>

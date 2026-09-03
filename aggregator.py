@@ -203,7 +203,7 @@ def _build_summary(
 if __name__ == "__main__":
     import sys
 
-    from incident_cli import looks_like_incident_id, run_step
+    from tools.incident_cli import looks_like_incident_id, run_step
     from models import IncidentStatus
 
     if len(sys.argv) > 1 and looks_like_incident_id(sys.argv[1]):

@@ -2,7 +2,7 @@
 Knowledge Base + RAG -- Vertex AI embeddings + plain-Python cosine similarity.
 
 Part A (seeding): pre-seed Firestore with a handful of past resolved incidents,
-each with a PRECOMPUTED embedding. Run once via `seed_knowledge_base.py`.
+each with a PRECOMPUTED embedding. Run once via `python3 -m tools.seed_knowledge_base`.
 
 Part B (retrieval): given a new incident's `IncidentEvidence`, embed its summary
 with Vertex AI, cosine-rank the seeded records in pure Python, and return only
@@ -22,7 +22,7 @@ Contract of `retrieve()`:
     call fails -- fail-closed at the caller.
 
 Standalone: `python3 knowledge_base.py`   (retrieval demo)
-            `python3 seed_knowledge_base.py`   (one-time seed)
+            `python3 -m tools.seed_knowledge_base`   (one-time seed)
 """
 
 from __future__ import annotations
@@ -252,7 +252,7 @@ def score_kb(query_summary: str, *, client: Optional[firestore.Client] = None) -
     records = _load_kb(client)
     if not records:
         raise RuntimeError(
-            "knowledge base is empty -- run: python3 seed_knowledge_base.py"
+            "knowledge base is empty -- run: python3 -m tools.seed_knowledge_base"
         )
     q = _embed(query_summary, task_type="RETRIEVAL_QUERY")
     scored = [(rec, _cosine(q, rec.get("embedding", []))) for rec in records]
@@ -314,7 +314,7 @@ if __name__ == "__main__":
 
     import sys
 
-    from incident_cli import looks_like_incident_id, run_step
+    from tools.incident_cli import looks_like_incident_id, run_step
     from models import IncidentStatus
 
     if len(sys.argv) > 1 and looks_like_incident_id(sys.argv[1]):
