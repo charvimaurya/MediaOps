@@ -1,457 +1,639 @@
-# MediaOps-AI
+# MediaOps CoPilot
 
-A simulated broadcast video pipeline with real-time telemetry, Prometheus/Grafana
-monitoring, and a control API for reproducing infrastructure incidents on demand.
+MediaOps CoPilot is an autonomous incident-response system for live video infrastructure. It detects sustained stream failures, investigates the video and telemetry independently, proposes a bounded remediation, passes that proposal through deterministic safety policy, executes the approved action against the real simulator, and independently verifies recovery.
 
-## Repo layout
+The project is built around one rule:
 
+> **AI supplies judgment. Deterministic code supplies authority.**
+
+Gemini can observe, classify, and propose. It cannot approve an action, execute a fix, or declare recovery. Those responsibilities belong to deterministic Python components with explicit, testable rules.
+
+## What the system demonstrates
+
+- A real FFmpeg media workload driven by a source MP4.
+- Controlled encoder overload, encoder failure, and network degradation.
+- Prometheus telemetry and a provisioned Grafana dashboard.
+- Two independent AI witnesses: video analysis and infrastructure analysis.
+- Firestore as the durable source of truth for every incident.
+- Retrieval-augmented remediation using verified historical incidents.
+- A fail-closed Safety Gate with no AI or LLM dependency.
+- Idempotent execution through a single Control Plane.
+- Sustained dual-domain recovery verification using metrics and video.
+- One bounded fallback attempt that must pass the same gate.
+- Slack reporting, verified-outcome knowledge-base writeback, tracing, and PDF reports.
+- A browser-based incident console showing the lifecycle in real time.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    User[Operator / Ops Console] -->|Inject fault| Simulator[Simulator + FFmpeg]
+    Simulator -->|media_* telemetry| Prometheus[Prometheus]
+    Prometheus --> Grafana[Grafana dashboard]
+    Prometheus --> Detector[Detector]
+    Detector -->|Create incident| Firestore[(Firestore)]
+
+    Firestore --> Orchestrator[Orchestrator]
+    Orchestrator --> Vision[Vision Agent<br/>video evidence]
+    Orchestrator --> Infra[Infra Agent<br/>infrastructure metrics]
+    Vision --> Aggregator[Evidence Aggregator]
+    Infra --> Aggregator
+    Aggregator --> Knowledge[Knowledge Base / RAG]
+    Knowledge --> Remediation[Remediation Agent]
+    Remediation -->|Fixed enum proposal| Gate{Deterministic<br/>Safety Gate}
+
+    Gate -->|BLOCK| SafeStop[Safe terminal state]
+    Gate -->|ALLOW only| Control[Idempotent Control Plane]
+    Control -->|Narrow control endpoint| Simulator
+    Control --> Verify[Verify Recovery<br/>video + sustained metrics]
+
+    Verify -->|RECOVERED| Report[Slack report]
+    Report --> Writeback[Verified KB writeback]
+    Writeback --> Closed[CLOSED]
+    Verify -->|RECOVERY_FAILED| Fallback[One bounded fallback]
+    Fallback -->|Same Safety Gate| Gate
+    Verify -->|CANNOT_VERIFY| SafeStop
+
+    Orchestrator -.persist every transition.-> Firestore
+    Firestore -->|Live incident state| User
+
+    classDef deterministic fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef ai fill:#f3e8ff,stroke:#9333ea,color:#3b0764;
+    classDef terminal fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef blocked fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+    class Gate,Control,Verify deterministic;
+    class Vision,Infra,Remediation ai;
+    class Closed terminal;
+    class SafeStop blocked;
 ```
-simulator/
-  video.mp4         source clip FFmpeg processes continuously
-  pipeline.py        runs FFmpeg against video.mp4, tracks process health, exposes /metrics on :8000
-  telemetry.py        Prometheus metric definitions
-  failures.py         failure-scenario state (healthy / overload / degradation / crash)
-  control_api.py       FastAPI control service on :8001
 
-prometheus/
-  prometheus.yml       scrapes the pipeline's /metrics endpoint
+The purple components use AI for bounded observation and proposals. The blue
+components make deterministic safety, execution, and recovery decisions. Every
+workflow transition is durably recorded in Firestore.
 
-docker-compose.yml     runs Prometheus + Grafana
-requirements.txt       Python dependencies
+### Detailed data and control flow
+
+```text
+                                    Firestore
+                           durable incident state + KB
+                                      ▲   │
+                                      │   ▼
+┌──────────────┐   media_*   ┌───────────────────┐
+│ Simulator +  │────────────▶│ Prometheus/Grafana│
+│ real FFmpeg  │             └─────────┬─────────┘
+│ :8000/:8001  │                       │ read-only telemetry
+└──────▲───────┘                       ▼
+       │ predefined control      ┌──────────┐
+       │ endpoints               │ Detector │
+       │                         └────┬─────┘
+       │                              ▼
+       │                         incident record
+       │                              │
+       │                              ▼
+       │                     ┌──────────────────┐
+       │                     │   Orchestrator   │
+       │                     └────────┬─────────┘
+       │                              │
+       │             ┌────────────────┴────────────────┐
+       │             ▼                                 ▼
+       │      Vision Agent                       Infra Agent
+       │       video pixels                    Prometheus/Grafana
+       │             └────────────────┬────────────────┘
+       │                              ▼
+       │                  Evidence Aggregator
+       │                              ▼
+       │                  Knowledge Base / RAG
+       │                              ▼
+       │                   Remediation Agent
+       │                     fixed action enum
+       │                              ▼
+       │                 Safety Gate (deterministic)
+       │                       ALLOW / BLOCK
+       │                              ▼ ALLOW only
+       └──────────────── Control Plane (idempotent)
+                                      ▼
+                              Verify Recovery
+                            video + stable metrics
+                                      ▼
+                       fallback? → report → KB → close
 ```
 
-## What has been built
+### Complete incident lifecycle
 
-### 1. Real media processing pipeline
-
-A real `video.mp4` file is processed through FFmpeg, creating a continuous
-media-processing workload:
-
-```
-video.mp4 → FFmpeg → media processing workload
+```text
+detect → record → diagnose (Vision ∥ Infra) → aggregate → retrieve
+       → propose → safety gate → execute → settle → verify
+       → fallback once if needed → report → KB writeback → CLOSED
 ```
 
-FFmpeg runs continuously using the video as the source, providing a realistic
-workload for monitoring. The pipeline tracks the health of the FFmpeg process
-and detects when it stops.
+Vision and Infra run in parallel. They remain independent witnesses: Vision describes pixels from the fault-specific video section, while Infra classifies bounded read-only telemetry. The aggregator continues only when their evidence is valid and corroborated.
 
-### 2. Media telemetry layer
+Every transition is persisted to the incident document's `lifecycle_events`, so a process restart or CLI trace does not depend on agent memory.
 
-A Python telemetry layer continuously collects and exposes operational metrics:
+## Guardrails
 
-| Metric | Description |
+### Fixed remediation surface
+
+The only permitted actions are defined by `RemediationAction` in `models.py`:
+
+| Enum action | Real simulator operation |
 |---|---|
-| FPS | Current video frame rate |
-| CPU usage | Encoder/process CPU utilization |
-| Memory usage | Encoder/process memory utilization |
-| Bitrate | Current video bitrate |
-| Encoding latency | Time required to process video |
-| Dropped frames | Percentage of frames being dropped |
-| Packet loss | Network packet loss |
-| Network latency | Network communication latency |
-| Encoder status | Whether the encoder is operational |
-| Pipeline health | Overall health of the media pipeline |
+| `RESTART_ENCODER` | restart the encoder process |
+| `REDUCE_PROFILE` | reduce bitrate to 50% |
+| `SWITCH_SOURCE` | switch to the backup source |
+| `FAILOVER` | invoke the predefined failover action |
 
-Metrics are exposed through a Prometheus-compatible `/metrics` endpoint:
+The Remediation Agent can select only one of these enum values. It never constructs commands.
 
-```
-Python media pipeline → telemetry layer → /metrics :8000
-```
+### Safety Gate
 
-### 3. Prometheus monitoring
+`safety_gate.py` is pure deterministic Python and defaults to `BLOCK`. `ALLOW` is returned only when every check explicitly passes:
 
-Prometheus collects and stores the time-series telemetry generated by the
-media pipeline, scraping the Python telemetry endpoint every 5 seconds:
+1. Action is in the fixed allow-list.
+2. Action is compatible with the diagnosed fault class.
+3. Target is an approved canonical component.
+4. Evidence exists and confidence meets the configured minimum.
+5. Blast radius is within policy.
+6. Per-incident action budget is available.
+7. Cooldown has elapsed.
 
-```
-Media pipeline → telemetry → Prometheus → time-series metrics
-```
+A missing value, missing configuration, malformed proposal, failed check, or unexpected exception produces `BLOCK` with a persisted reason.
 
-### 4. Grafana integration
+### Control Plane
 
-Grafana is connected to Prometheus and provides the monitoring and
-visualization layer — the operational view an on-call engineer would
-normally use when investigating an incident:
+`control_plane.py` reads the stored `SafetyDecision`; it never executes directly from a proposal. It requires `ALLOW`, claims the decision's idempotency key atomically in Firestore, and calls one narrow `/control/*` endpoint in the Uvicorn-owned simulator process. Replaying the same incident/key returns the prior execution result without executing twice.
 
-```
-Prometheus → Grafana → media infrastructure dashboard
-```
+An `ExecutionResult.success` means only that the control call succeeded. It does not mean the stream recovered.
 
-### 5. Controlled failure simulation
+### Recovery verification
 
-A controlled failure layer lets infrastructure incidents be reproduced
-reliably during development and demonstrations.
+`verify_recovery.py` waits for telemetry to settle, samples required Prometheus signals throughout a stable window, and re-runs Vision against the healthy video section. Recovery requires both domains to remain healthy for the entire window:
 
-**Encoder overload** — CPU 97%, FPS 18, memory 88%, encoding latency 190ms,
-dropped frames 8.2%.
+- `RECOVERED`: metrics and video positively confirm sustained recovery.
+- `RECOVERY_FAILED`: still broken, relapsed, or the domains disagree.
+- `CANNOT_VERIFY`: reliable evidence was unavailable.
 
-**Network degradation** — packet loss 12%, network latency 420ms, FPS 20,
-bitrate 3.5 Mbps.
+Telemetry unavailability is never interpreted as health. Verification does not close the incident; closure belongs to the orchestrator after reporting and writeback.
 
-**Encoder failure** — FPS 0, bitrate 0, dropped frames 100%, encoder status
-FAILED.
+## Repository structure
 
-**Recovery** — resets the pipeline back to a healthy state:
-
-```
-Failure → recovery → healthy pipeline
-```
-
-This makes it possible to demonstrate the complete incident lifecycle
-deterministically.
-
-### 6. Failure control API
-
-A FastAPI control service exposes endpoints for triggering failures and
-recovering the pipeline:
-
-```
-GET  /health
-GET  /state
-
-POST /failure/encoder-overload
-POST /failure/network-degradation
-POST /failure/encoder-crash
-
-POST /recovery/reset
-```
-
-For example:
-
-```bash
-curl -X POST http://localhost:8001/failure/encoder-overload
+```text
+.
+├── models.py                  strict Pydantic contracts and enums
+├── detector.py                Prometheus persistence detector
+├── incident_recorder.py       Firestore incident persistence and dedup
+├── orchestrator.py            full lifecycle coordinator
+├── aggregator.py              deterministic dual-domain corroboration
+├── knowledge_base.py          Firestore KB, embeddings, cosine retrieval
+├── safety_gate.py             deterministic fail-closed policy
+├── control_plane.py           ALLOW-only idempotent execution
+├── verify_recovery.py         sustained video + telemetry verification
+├── fallback.py                one bounded alternate attempt
+├── report.py                  one Slack incident report
+├── kb_writeback.py            verified-success precedent writeback
+├── pdf_report.py              downloadable incident PDF generation
+├── observability.py           consistent structured lifecycle logging
+├── agents/
+│   ├── vision_agent.py        Gemini video symptom classification
+│   ├── infra_agent.py         Gemini telemetry fault classification
+│   └── remediation_agent.py   Gemini bounded action proposal
+├── web/
+│   ├── ops_console.py         FastAPI backend; credentials stay server-side
+│   ├── static/index.html      single-page incident operations console
+│   └── grafana/               provisioned dashboard and datasource
+├── tools/
+│   ├── trace.py               complete Firestore lifecycle timeline
+│   ├── cleanup_incidents.py   preview-first stale incident cleanup
+│   ├── seed_knowledge_base.py seeded verified precedents
+│   └── incident_cli.py        shared standalone-step runner
+├── simulator/                 FFmpeg workload, telemetry, faults, controls
+├── prometheus/                Prometheus scrape configuration
+├── tests/                     unit and integration tests
+├── docker-compose.yml         Prometheus and Grafana
+└── requirements.txt           Python dependencies
 ```
 
-triggers an encoder overload scenario. The AI agent will eventually use the
-same control interface to perform automated remediation.
+`simulator/control_api.py` owns the simulator state, telemetry loop, metrics server, FFmpeg handle, failure injection, and predefined control actions in one process. Do not start `simulator.pipeline` separately; that would create an isolated state and compete for port 8000.
 
-## Current architecture
+## Incident data in Firestore
 
-```
-                         ┌──────────────┐
-                         │  video.mp4   │
-                         └──────┬───────┘
-                                │
-                                ▼
-                         ┌──────────────┐
-                         │    FFmpeg    │
-                         │ Media Engine │
-                         └──────┬───────┘
-                                │
-                                ▼
-                    ┌────────────────────────┐
-                    │   Python Telemetry     │
-                    │                        │
-                    │ FPS                    │
-                    │ CPU                    │
-                    │ Memory                 │
-                    │ Bitrate                │
-                    │ Encoding Latency       │
-                    │ Dropped Frames         │
-                    │ Packet Loss            │
-                    │ Network Latency        │
-                    │ Encoder Status         │
-                    │ Pipeline Health        │
-                    └───────────┬────────────┘
-                                │
-                           /metrics
-                                │
-                                ▼
-                       ┌────────────────┐
-                       │   Prometheus   │
-                       │ Time-Series DB │
-                       └───────┬────────┘
-                               │
-                               ▼
-                       ┌────────────────┐
-                       │    Grafana     │
-                       │ Monitoring     │
-                       │ & Visualization│
-                       └────────────────┘
+Incidents are stored in the `incidents` collection. The Firestore document ID is the `incident_id` used by every component and CLI.
 
+Important fields include:
 
-                       CONTROL PLANE
-                              │
-                              ▼
-                     ┌─────────────────┐
-                     │  FastAPI :8001  │
-                     └────────┬────────┘
-                              │
-             ┌────────────────┼────────────────┐
-             ▼                ▼                ▼
-       Encoder          Network          Encoder
-       Overload        Degradation         Crash
-             │                │                │
-             └────────────────┼────────────────┘
-                              ▼
-                       Pipeline State
-                              │
-                              ▼
-                           Recovery
-```
+| Field | Purpose |
+|---|---|
+| `status`, `current_step` | current durable workflow position |
+| `lifecycle_events` | ordered component/step/outcome timeline |
+| `anomaly` | detector evidence and telemetry snapshot |
+| `vision`, `infra` | independent AI findings |
+| `evidence` | deterministic aggregation and agreement |
+| `precedent` | retrieved KB matches and similarity |
+| `proposal` | bounded AI remediation suggestion |
+| `safety_decision` | checks, verdict, reason, idempotency key |
+| `execution` | control-call result only |
+| `verification` | samples, dual-domain result, final verdict |
+| `*_history` | original and fallback attempt history |
+| `report_sent` | Slack reporting result |
+| `kb_writeback_id` | verified precedent written to the KB |
+| `terminal_step`, `terminal_reason` | human-readable reason for a safe stop |
 
-## Running it
+Terminal outcomes include `CLOSED`, `BLOCKED`, `CANNOT_VERIFY`, `AUTOMATION_FAILED`, `ESCALATED`, and `FAILED`. Only a verified recovered incident proceeds to successful closure and KB writeback.
 
-### Prerequisites
+## Prerequisites
 
 - Python 3.11+
-- [ffmpeg](https://ffmpeg.org/) on `PATH` (`brew install ffmpeg` on macOS)
-- Docker + Docker Compose
+- FFmpeg on `PATH`
+- Docker with Docker Compose
+- Google Cloud project with Firestore, Vertex AI, and required APIs enabled
+- Google Application Default Credentials for local Firestore/Vertex access
+- `uv`/`uvx` when using the Grafana MCP telemetry path
+- Optional Slack incoming webhook
 
-### Start everything
+macOS examples:
 
-The pipeline and control API run locally as two separate Python processes;
-Prometheus and Grafana run in Docker.
+```bash
+brew install ffmpeg
+brew install --cask docker
+brew install uv
+gcloud auth application-default login
+```
+
+Create a Firestore Native Mode database in the configured project before the first run.
+
+## Configuration
+
+Create a local environment file and never commit its secrets:
+
+```bash
+cp .env.example .env
+```
+
+The application modules load `.env` through the project configuration path where applicable. You can also export variables in each terminal.
+
+### Required local values
+
+```bash
+export GCP_PROJECT_ID="your-google-cloud-project"
+export GCP_REGION="us-central1"
+export FIRESTORE_DATABASE_ID="(default)"
+```
+
+Use Application Default Credentials:
+
+```bash
+gcloud auth application-default login
+gcloud auth application-default set-quota-project "$GCP_PROJECT_ID"
+```
+
+### Grafana MCP for the Infra Agent
+
+Local Grafana is provisioned at `http://localhost:3000`. Create a Viewer service-account token and set:
+
+```bash
+export GRAFANA_URL="http://localhost:3000"
+export GRAFANA_SERVICE_ACCOUNT_TOKEN="glsa_..."
+export GRAFANA_DATASOURCE_UID="mediaops-prometheus"
+export INFRA_METRICS_SOURCE="grafana_mcp"
+```
+
+For local development without MCP, the deterministic Prometheus HTTP reader is available:
+
+```bash
+export INFRA_METRICS_SOURCE="prometheus_http"
+export PROMETHEUS_URL="http://localhost:9090"
+```
+
+### Slack
+
+`report.py` reads `SLACK_WEBHOOK_URL`:
+
+```bash
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+```
+
+HTTPS certificate verification uses Certifi by default. Override only when your environment requires a custom bundle:
+
+```bash
+export SLACK_CA_BUNDLE="/path/to/ca-bundle.pem"
+```
+
+### Safety and verification tuning
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `SAFETY_MIN_CONFIDENCE` | `0.80` | minimum proposal/evidence confidence |
+| `SAFETY_MAX_ACTIONS` | `2` | per-incident action budget |
+| `SAFETY_COOLDOWN_SECONDS` | `15` | time between actions |
+| `SAFETY_MAX_BLAST_RADIUS` | `stream` | largest permitted scope |
+| `VERIFY_POST_EXECUTION_SETTLE_SECONDS` | `12` | telemetry propagation delay |
+| `VERIFY_STABLE_WINDOW_SECONDS` | `15` | sustained healthy window |
+| `VERIFY_SAMPLE_INTERVAL_SECONDS` | `3` | metric sampling interval |
+| `VERIFY_VIDEO_MIN_CONFIDENCE` | `0.80` | minimum healthy-video confidence |
+| `KB_RELEVANCE_THRESHOLD` | `0.80` | minimum cosine similarity |
+| `KB_MAX_MATCHES` | `3` | maximum retrieved precedents |
+
+## Run locally
+
+Run commands from the repository root.
+
+### 1. Install Python dependencies
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+```
 
-# terminal 1 — media pipeline + /metrics on :8000
-python3 -m simulator.pipeline
+### 2. Start the simulator
 
-# terminal 2 — control API on :8001
-uvicorn simulator.control_api:app --reload --port 8001
+Terminal 1:
 
-# terminal 3 — Prometheus + Grafana
-docker compose up
+```bash
+python3 -m uvicorn simulator.control_api:app --host 127.0.0.1 --port 8001
+```
+
+This single command starts:
+
+- the failure/control API on port 8001;
+- the real FFmpeg workload;
+- the telemetry loop; and
+- Prometheus-format metrics on port 8000.
+
+Do **not** also run `python3 -m simulator.pipeline`.
+
+Verify it:
+
+```bash
+curl http://localhost:8001/health
+curl http://localhost:8001/state
+curl http://localhost:8000/metrics | grep '^media_'
+```
+
+### 3. Start Prometheus and Grafana
+
+Terminal 2:
+
+```bash
+docker compose up -d prometheus grafana
+docker compose ps
 ```
 
 | Service | URL |
 |---|---|
-| Pipeline metrics | http://localhost:8000/metrics |
-| Control API | http://localhost:8001 |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 |
+| Simulator state/control | <http://localhost:8001> |
+| Raw simulator metrics | <http://localhost:8000/metrics> |
+| Prometheus | <http://localhost:9090> |
+| Grafana | <http://localhost:3000> |
 
-`prometheus/prometheus.yml` scrapes `host.docker.internal:8000`, i.e. the
-locally running `pipeline.py`, not a containerized service.
+Prometheus scrapes `host.docker.internal:8000` every five seconds. Grafana is automatically provisioned with the `MediaOps Prometheus` datasource and the `MediaOps` dashboard; no manual dashboard creation is required.
 
-### Verify it's working
-
-```bash
-curl http://localhost:8000/metrics   # Prometheus exposition, media_* gauges
-curl http://localhost:8001/health    # {"status": "ok", ...}
-curl http://localhost:8001/state     # current fps/cpu/bitrate/etc.
-```
-
-In Prometheus (http://localhost:9090), query `media_pipeline_health` — it
-should read `1`. In Grafana (http://localhost:3000, default login
-`admin`/`admin`, changed on first login), add Prometheus
-(`http://mediaops-prometheus:9090` from inside the Grafana container) as a
-data source and build panels off the `media_*` metrics.
-
-### Try a failure scenario
+Verify Prometheus:
 
 ```bash
-# trigger encoder overload
-curl -X POST http://localhost:8001/failure/encoder-overload
-
-# watch it land in /state or /metrics within one telemetry tick (~5s)
-curl http://localhost:8001/state
-
-# recover
-curl -X POST http://localhost:8001/recovery/reset
+curl -G http://localhost:9090/api/v1/query \
+  --data-urlencode 'query=media_pipeline_health'
 ```
 
-> **Note:** `pipeline.py` and `control_api.py` run as separate OS
-> processes, each with its own in-memory `current_state`. `/failure/*`
-> only mutates `control_api.py`'s own copy, so it does **not** currently
-> change what `pipeline.py` pushes to Prometheus. To see a failure
-> reflected in Prometheus/Grafana/the Incident Detector below, the state
-> flip needs to happen inside the same process that's running
-> `pipeline.py`'s telemetry loop -- this is a pre-existing limitation, not
-> something the Incident Detector changes.
+### 4. Seed the knowledge base
 
-## Incident Detector
-
-`detector/` is a deterministic (no AI, no LLM) service that polls
-Prometheus for the metrics above, applies fixed threshold rules, and logs
-an `Incident` once a fault is confirmed over several consecutive samples.
-It creates incidents only -- no remediation, no auto-resolution.
-
-### 1. Start the stack
+Run once after Firestore and Vertex AI credentials are ready. The operation is idempotent:
 
 ```bash
-docker compose up -d                                  # Prometheus + Grafana
-python3 -m simulator.pipeline                          # media pipeline + /metrics on :8000
-uvicorn simulator.control_api:app --port 8001           # control API
-python3 -m detector.detector                            # incident detector
+python3 -m tools.seed_knowledge_base
 ```
 
-The detector polls `http://localhost:9090` (Prometheus) every 0.5s by
-default, and exposes its own two new metrics
-(`mediaops_incidents_total`, `mediaops_open_incidents`) on
-`http://localhost:8002/metrics`. Prometheus is not currently configured to
-scrape that port -- see the note in `detector/metrics.py` if you want to
-wire that up.
+Seed records live in the `knowledge_base` collection and are separate from incident documents.
 
-### 2. Inject each failure
+### 5. Start the operations console
 
-Because of the cross-process caveat above, `/failure/*` on `control_api.py`
-won't currently show up in Prometheus. Until that's addressed, the most
-reliable way to see the detector react to a real failure is to flip
-`simulator.pipeline.current_state` from inside the same process running
-the telemetry loop (e.g. a short script that imports
-`simulator.pipeline`/`simulator.failures` and sets
-`pipeline.current_state = failures.encoder_overload()` directly, the way
-`pipeline.py`'s own `main()` runs). Once that path is fixed, the intended
-flow is simply:
+Terminal 3:
+
+```bash
+python3 -m uvicorn web.ops_console:app --host 127.0.0.1 --port 8081
+```
+
+Open <http://127.0.0.1:8081>.
+
+The console provides:
+
+- guided fault injection;
+- healthy → broken → verified-healthy video evidence;
+- a real-time one-step workflow card;
+- Vision and Infra findings with supporting evidence;
+- Safety Gate checks and verification samples;
+- an expandable final incident audit;
+- a read-only embedded Grafana dashboard;
+- a downloadable PDF for closed recovered incidents.
+
+Use one console tab during a live run. The page polls the active incident document and stops polling after a terminal result.
+
+### 6. Run a complete incident
+
+The easiest path is to select a fault in the console. It injects the real simulator fault, waits for sustained detection, creates the incident, and invokes the real orchestrator automatically.
+
+To inject manually:
 
 ```bash
 curl -X POST http://localhost:8001/failure/encoder-overload
-curl -X POST http://localhost:8001/failure/network-degradation
 curl -X POST http://localhost:8001/failure/encoder-crash
+curl -X POST http://localhost:8001/failure/network-degradation
+```
+
+Allow roughly one telemetry update, one Prometheus scrape, and the 15-second detector persistence window. A normal detection commonly takes 15–25 seconds after injection.
+
+The reset endpoint is for returning a demo environment to baseline, not for proving automated recovery:
+
+```bash
 curl -X POST http://localhost:8001/recovery/reset
 ```
 
-### 3. Expected log output and timing
+The Control Plane uses the real predefined endpoints instead:
 
-Detector logs go to stdout wherever you ran `python3 -m detector.detector`.
-
-```
-INCIDENT INC-001 encoder_overload HIGH cpu_usage=97.0 fps=18.0 encoding_latency=190.0 ...
-```
-
-Roughly how long after the underlying metric changes:
-- `encoder_failure`: as soon as the *next* poll sees it (1 breaching
-  sample is enough) -- within one Prometheus scrape (`scrape_interval: 5s`)
-  plus up to one detector poll (0.5s).
-- `network_degradation` / `encoder_overload`: 3 consecutive breaching
-  polls are required, so typically ~1.5s after Prometheus has picked up
-  the new value, on top of the same scrape delay.
-- If Prometheus can't be reached or a metric is briefly missing, you'll
-  see `WARNING Prometheus has no data for '<metric>'` lines -- the
-  detector keeps running and does not create an incident from partial data.
-- After 3 consecutive healthy samples, an open incident logs
-  `CANDIDATE_CLEAR ...` but stays `OPEN` (`resolved_at` stays `None`) --
-  closing incidents is a later phase.
-
-### 4. Reset detector state between demo runs
-
-The detector has no persistence -- restarting the process resets
-everything. To reset without restarting, call `force_clear()` on the
-`IncidentDetector` instance (there's no HTTP endpoint for it in this
-phase, since section J of this build explicitly excludes an API server).
-
-## Master Agent
-
-`agent/` is a deterministic state machine (no AI, no LLM) that receives
-each incident the detector creates and drives it through `DIAGNOSING →
-CONSULTING_KNOWLEDGE → DECIDING → GUARDRAIL_CHECK → ACTING → VERIFYING`,
-either reaching `RESOLVED` or escalating to `FAILED_SAFE`. Diagnosis is
-still a stub (`StubDiagnosisProvider`) behind the `DiagnosisProvider`
-interface a later phase replaces with Gemini. **Remediation is now
-real**: `RealActionExecutor` calls `simulator/control.py`'s
-`PipelineControl`, which mechanically mutates the simulator's actual
-fault-layer state (`encoder_fault` / `network_fault` / `bitrate_factor` /
-`active_output`) -- there is no "clear the fault flag" shortcut anywhere.
-A full guardrail engine (`agent/guardrails.py`) sits in front of every
-execution: allowed-actions per type, `MAX_ATTEMPTS`, a 10s per-action
-cooldown tracked globally across incidents, a system-wide in-flight lock,
-and a confidence floor that restricts low-confidence diagnoses to
-non-destructive actions only.
-
-Starting it is the same as above -- `python3 -m detector.detector` builds
-and wires a `MasterAgent` with `RealActionExecutor`.
-
-**Runs should now reach `RESOLVED`, not `FAILED_SAFE`** -- confirmed live
-against real Prometheus data and a real `ffmpeg` restart:
-
-```
-[MasterAgent] RECEIVED: incident INC-001 received
-[MasterAgent] DIAGNOSING: Encoder resource saturation (confidence 1.00)
-[MasterAgent] CONSULTING_KNOWLEDGE: 3 historical record(s), best action=restart_encoder
-[MasterAgent] DECIDING: chose restart_encoder (source=diagnosis, path=NORMAL)
-[MasterAgent] GUARDRAIL_CHECK: approved restart_encoder
-RealActionExecutor: restart_encoder succeeded in 0.33s -- encoder restarted in 0.33s
-[MasterAgent] ACTING: executed restart_encoder
-[MasterAgent] VERIFYING: PASSED
-[MasterAgent] RESOLVED: incident INC-001 resolved (RTO=6.35s)
+```text
+POST /control/restart-encoder
+POST /control/reduce-profile
+POST /control/switch-source
+POST /control/failover
 ```
 
-A wrong-first-action run legitimately escalates -- if the diagnosis
-recommends something outside the incident type's allowed list (e.g.
-`restart_encoder` for `network_degradation`), the guardrail denies it
-*before it ever executes*, and the agent falls back to the correct
-permitted action instead:
+## Run components manually
 
+Every standalone workflow component reads and writes the same Firestore incident document. Replace `<incident_id>` with a real document ID.
+
+```bash
+# Independent diagnosis (normally run in parallel)
+python3 -m agents.vision_agent <incident_id> overload
+python3 -m agents.infra_agent <incident_id>
+
+# Corroborate, retrieve, and propose
+python3 aggregator.py <incident_id>
+python3 knowledge_base.py <incident_id>
+python3 -m agents.remediation_agent <incident_id>
+
+# Deterministic authorization, execution, and verification
+python3 safety_gate.py <incident_id>
+python3 control_plane.py <incident_id>
+python3 verify_recovery.py <incident_id>
+
+# Optional fallback and final outputs
+python3 fallback.py <incident_id>
+python3 report.py <incident_id>
+python3 kb_writeback.py <incident_id>
+
+# Or run the full lifecycle on an already-recorded incident
+python3 orchestrator.py <incident_id>
 ```
-DECIDING          Chose action='restart_encoder' via diagnosis on path=NORMAL
-GUARDRAIL_CHECK   DENIED [allowed_actions]: 'restart_encoder' is not permitted for network_degradation
-DECIDING          Chose action='reduce_bitrate' via policy on path=NORMAL
-GUARDRAIL_CHECK   Approved action='reduce_bitrate' (approved)
-ACTING            Executed 'reduce_bitrate': bitrate reduced to 0.50x nominal (was 1.00x)
-VERIFYING         Verification passed after 'reduce_bitrate'
-RESOLVED          Incident INC-E2E resolved
+
+Vision's optional second argument selects a video section such as `overload`, `failure`, or `healthy`. The orchestrator normally chooses it from the simulator's actual active-fault state.
+
+## Observe and debug
+
+### Structured logs
+
+Components emit a consistent searchable format containing timestamp, component, incident ID, step/action, and outcome. Run the console or component from a terminal and filter one lifecycle:
+
+```bash
+python3 -m uvicorn web.ops_console:app --host 127.0.0.1 --port 8081 2>&1 \
+  | grep '<incident_id>'
 ```
 
-**Which action resolves which fault:**
+### Complete Firestore trace
 
-| Fault | Resolves it | Does NOT resolve it |
-|---|---|---|
-| `encoder_overload` | `restart_encoder`, `switch_backup` | `reduce_bitrate` alone (only partial relief -- `cpu_usage` stays pinned above the healthy threshold) |
-| `network_degradation` | `reduce_bitrate`, `switch_backup`* | `restart_encoder` (guardrail-denied -- not even in this type's allowed list) |
-| `encoder_failure` | `restart_encoder`, `switch_backup` | `reduce_bitrate` (not in this type's allowed list either) |
+```bash
+python3 -m tools.trace <incident_id>
+```
 
-\* `switch_backup` only helps `network_degradation` if the network fault
-is primary-specific; in this simulator `network_fault` is a shared
-condition, so in practice `reduce_bitrate` is what actually clears it.
-`failover` resolves all three -- it's the blunt, deliberately
-over-broad fail-safe.
+The trace includes ordered lifecycle events, both findings, agreement, KB matches, proposal, every Safety Gate check, execution, verification samples, fallback, reporting, writeback, and the terminal reason.
 
-**Approximate timings**, dominated by Prometheus's own 5s scrape
-interval (`agent/verification.py`'s settle period is 6s specifically to
-guarantee at least one fresh scrape before checking):
-- Detection: ~2-6s after injection (one scrape + 3 consecutive detector polls at 0.5s each for `encoder_overload`/`network_degradation`; 1 poll for `encoder_failure`).
-- `restart_encoder` itself: under 2s (usually ~0.3s for a local-file ffmpeg restart).
-- Verification settle: 6s.
-- End-to-end RTO for a correct first action: typically 6-8s.
+### Inspect Firestore
 
-Same cross-process caveat as the detector section above applies, with an
-extra wrinkle now: `RealActionExecutor`'s default `PipelineControl()`
-talks to *its own process's* `simulator.pipeline` module. For
-`restart_encoder` to control the real `ffmpeg` subprocess,
-`python3 -m detector.detector` needs to run in the **same process** as
-`pipeline.py`'s telemetry loop -- running them as the two separate
-terminals shown above means the agent's actions have no real ffmpeg
-process to act on. This is the same underlying limitation noted earlier
-in this README, now affecting remediation too, not just detection.
+Open the Google Cloud Firestore data viewer for your project and select the `incidents` collection:
 
-The new Prometheus metrics (`mediaops_aht_seconds`, `mediaops_rto_seconds`,
-`mediaops_agent_actions_total`, `mediaops_escalation_path`,
-`mediaops_action_duration_seconds`, `mediaops_guardrail_denials_total`,
-`mediaops_active_encoder`) are exposed on the same
-`http://localhost:8002/metrics` as the detector's own metrics (not
-currently scraped by Prometheus, same reasoning as before).
+```text
+https://console.cloud.google.com/firestore/databases/-default-/data/panel/incidents?project=YOUR_PROJECT_ID
+```
+
+### Preview and clean stale incidents
+
+The cleanup tool only targets non-terminal incident documents and never touches the `knowledge_base` collection. Preview comes first:
+
+```bash
+python3 -m tools.cleanup_incidents --older-than-hours 24
+```
+
+Request deletion only after reviewing the preview:
+
+```bash
+python3 -m tools.cleanup_incidents --older-than-hours 24 --delete
+```
+
+You must type the exact displayed confirmation before anything is deleted.
+
+## Tests
+
+Run the complete suite:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+Run focused groups:
+
+```bash
+python3 -m unittest tests.test_safety_gate -v
+python3 -m unittest tests.test_control_plane -v
+python3 -m unittest tests.test_verify_recovery -v
+python3 -m unittest tests.test_orchestrator -v
+python3 -m unittest tests.test_ops_console -v
+```
+
+Tests use fakes/mocks where appropriate and do not require destructive simulator changes. Live end-to-end validation additionally requires the simulator, Prometheus/Grafana, Firestore, and Google credentials.
 
 ## Evaluation
 
-We validated each AI agent against known fault scenarios (our golden set:
-encoder overload, encoder failure, RGB shift, network degradation, plus a
-healthy baseline), running each multiple times to measure reliability.
+The golden scenarios cover encoder overload, encoder failure, RGB shift, network degradation, and a healthy baseline. AI-agent evaluations use separate Gemini calls; deterministic guardrail and verification cases use controlled inputs and live telemetry where required.
 
-| Agent / Behavior | Test | Result |
-|---|---|---|
-| Vision Agent | Correct symptom per fault | 5/5 |
-| Infra Agent | Correct fault class per fault | High accuracy* |
-| Remediation Agent | Valid enum action + precedent cited | 5/5 |
-| Dual-domain agreement | Vision + Infra corroborate | 5/5 |
-| Safety Gate | Allows valid; blocks incompatible + low-confidence | 5/5 |
-| Verify Recovery | `RECOVERED` / `RECOVERY_FAILED` / `CANNOT_VERIFY` | 5/5 |
+| Agent / behavior | Evaluation |
+|---|---|
+| Vision Agent | expected symptom for each video section |
+| Infra Agent | expected fault class from bounded metrics |
+| Remediation Agent | valid enum action and retrieved-case rationale |
+| Dual-domain agreement | Vision and Infra corroborate known faults |
+| Safety Gate | valid proposal allowed; incompatible and low-confidence proposals blocked |
+| Verify Recovery | recovered, still-broken, and unreadable-telemetry verdicts |
 
-\*The Infra Agent occasionally returns a low-confidence `unknown` when the
-metrics window contains transitional data; these results are correctly
-rejected by the confidence guardrail rather than driving an incorrect action—a
-direct example of the **“AI proposes, deterministic code decides”** principle.
+Infra may return low-confidence `unknown` for transitional metric windows. The confidence guardrail rejects that uncertainty rather than allowing it to drive an action—an intentional example of AI judgment being bounded by deterministic authority.
 
-## Operations console
+## Troubleshooting
 
-Start the single-page incident console on port 8081:
+### Firestore unavailable or `Internal Server Error`
 
-```bash
-uvicorn web.ops_console:app --port 8081
+1. Confirm ADC and project selection:
+
+   ```bash
+   gcloud auth application-default login
+   gcloud config get-value project
+   echo "$GCP_PROJECT_ID"
+   ```
+
+2. Confirm Firestore exists in Native Mode and `FIRESTORE_DATABASE_ID` is correct.
+3. Keep one console tab open during a run; old cached tabs can continue polling until closed.
+4. Restart the console process to create a fresh Firestore gRPC channel.
+
+### Step 1 takes time
+
+The delay is deliberate: simulator telemetry updates every five seconds, Prometheus scrapes every five seconds, the detector polls every three seconds, and health must stay at zero for 15 seconds. The console displays “Monitoring stream” while confirming persistence.
+
+### Grafana iframe is blank
+
+The Compose configuration already sets:
+
+```text
+GF_SECURITY_ALLOW_EMBEDDING=true
+GF_AUTH_ANONYMOUS_ENABLED=true
+GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
 ```
 
-Then open <http://localhost:8081>.
+Restart Grafana after configuration changes:
+
+```bash
+docker compose up -d --force-recreate grafana
+```
+
+The default embedded URL is:
+
+```text
+http://localhost:3000/d/mediaops/mediaops?orgId=1&refresh=5s&theme=dark&kiosk
+```
+
+Override it with `GRAFANA_EMBED_URL` when necessary.
+
+### Infra Agent cannot start Grafana MCP
+
+Confirm `uvx` is installed, the Viewer token is set, the datasource UID is correct, and Grafana is reachable. For a simpler local path, set `INFRA_METRICS_SOURCE=prometheus_http`.
+
+### Slack report is not sent
+
+Set `SLACK_WEBHOOK_URL` (the exact name consumed by `report.py`). If TLS uses a private CA, set `SLACK_CA_BUNDLE`; otherwise Certifi is used automatically.
+
+### Ports already in use
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+lsof -nP -iTCP:8001 -sTCP:LISTEN
+lsof -nP -iTCP:8081 -sTCP:LISTEN
+```
+
+Stop the stale owning process before restarting the corresponding service. Never start both `simulator.pipeline` and `simulator.control_api`.
+
+## Safety boundaries
+
+- Never give an AI agent execution or approval authority.
+- Never execute a proposal that lacks an `ALLOW` SafetyDecision.
+- Never treat execution success as recovery.
+- Never treat missing telemetry as healthy.
+- Never bypass idempotency, action budgets, cooldowns, or compatibility policy.
+- Never write an unverified outcome as a successful KB precedent.
+- Never expose Firestore, Slack, Grafana service-account, or Google credentials to browser JavaScript or Gemini.
