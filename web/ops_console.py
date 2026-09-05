@@ -51,6 +51,7 @@ FAULT_ENDPOINTS = {
 app = FastAPI(title="MediaOps CoPilot Console")
 _workflow_lock = threading.Lock()
 _workflow_active = False
+_active_incident_id: str | None = None
 
 
 def get_recorder() -> IncidentRecorder:
@@ -142,21 +143,25 @@ def prometheus_metrics() -> dict:
     }
 
 
-def _detect_and_orchestrate() -> None:
+def _detect_and_orchestrate(workflow_claimed: bool = False) -> None:
     """Run the proven workflow components after a console fault injection."""
-    global _workflow_active
-    with _workflow_lock:
-        if _workflow_active:
-            logger.info("console workflow already monitoring an injected fault")
-            return
-        _workflow_active = True
+    global _workflow_active, _active_incident_id
+    if not workflow_claimed:
+        with _workflow_lock:
+            if _workflow_active:
+                logger.info("console workflow already monitoring an injected fault")
+                return
+            _workflow_active = True
     try:
         recorder = IncidentRecorder()
         incident_id: str | None = None
 
         def record(event) -> None:
             nonlocal incident_id
+            global _active_incident_id
             incident_id = recorder.record(event)
+            with _workflow_lock:
+                _active_incident_id = incident_id
             log_event("ops_console", incident_id, "trigger_workflow", "detected")
 
         detector = Detector(on_anomaly=record)
@@ -174,6 +179,7 @@ def _detect_and_orchestrate() -> None:
     finally:
         with _workflow_lock:
             _workflow_active = False
+            _active_incident_id = None
 
 
 @app.get("/", include_in_schema=False)
@@ -190,6 +196,7 @@ def console_health() -> dict:
         "simulator": simulator,
         "prometheus": "connected" if health is not None else "unavailable",
         "workflow_active": _workflow_active,
+        "active_incident_id": _active_incident_id,
     }
 
 
@@ -210,12 +217,36 @@ def read_public_config() -> dict:
 
 @app.post("/api/fault/{fault}")
 def inject_fault(fault: str, background_tasks: BackgroundTasks = None) -> dict:
+    global _workflow_active, _active_incident_id
     endpoint = FAULT_ENDPOINTS.get(fault)
     if endpoint is None:
         raise HTTPException(status_code=404, detail="unknown predefined fault")
-    result = simulator_request(endpoint, method="POST")
-    if fault != "reset" and background_tasks is not None:
-        background_tasks.add_task(_detect_and_orchestrate)
+    starts_workflow = fault != "reset" and background_tasks is not None
+    if starts_workflow:
+        # Reserve the single workflow slot before touching the simulator. This
+        # closes the race where a second fault could be injected while the
+        # first incident was still running, then receive no detector worker.
+        with _workflow_lock:
+            if _workflow_active:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "An incident is already running. Return to the current "
+                        "incident and wait for it to finish."
+                    ),
+                )
+            _workflow_active = True
+            _active_incident_id = None
+    try:
+        result = simulator_request(endpoint, method="POST")
+    except Exception:
+        if starts_workflow:
+            with _workflow_lock:
+                _workflow_active = False
+                _active_incident_id = None
+        raise
+    if starts_workflow:
+        background_tasks.add_task(_detect_and_orchestrate, True)
     if background_tasks is None:
         return result
     return {**result, "workflow_started": fault != "reset"}

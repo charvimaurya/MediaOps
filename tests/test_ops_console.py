@@ -60,6 +60,12 @@ class Recorder:
 
 
 class OpsConsoleTests(unittest.TestCase):
+    def setUp(self):
+        # Each endpoint test starts with no process-wide console workflow.
+        with ops_console._workflow_lock:
+            ops_console._workflow_active = False
+            ops_console._active_incident_id = None
+
     def test_console_starts_with_guided_welcome_then_has_split_workflow(self):
         page = ops_console.PAGE.read_text()
         self.assertIn('id="landingView"', page)
@@ -80,6 +86,7 @@ class OpsConsoleTests(unittest.TestCase):
         self.assertIn('id="workflowView"', page)
         self.assertIn('class="split"', page)
         self.assertIn("Back / try another error", page)
+        self.assertIn("if(box)box.innerHTML", page)
 
     def test_workflow_uses_one_current_card_with_subtle_progress(self):
         page = ops_console.PAGE.read_text()
@@ -209,6 +216,40 @@ class OpsConsoleTests(unittest.TestCase):
             result = ops_console.inject_fault("reset", reset_tasks)
         self.assertFalse(result["workflow_started"])
         self.assertEqual(len(reset_tasks.tasks), 0)
+
+    def test_active_workflow_rejects_fault_before_simulator_is_modified(self):
+        with ops_console._workflow_lock:
+            ops_console._workflow_active = True
+        tasks = BackgroundTasks()
+        with patch.object(ops_console, "simulator_request") as request:
+            with self.assertRaises(ops_console.HTTPException) as raised:
+                ops_console.inject_fault("encoder-failure", tasks)
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("already running", raised.exception.detail)
+        request.assert_not_called()
+        self.assertEqual(len(tasks.tasks), 0)
+
+    def test_failed_fault_injection_releases_workflow_slot(self):
+        tasks = BackgroundTasks()
+        with patch.object(
+            ops_console, "simulator_request", side_effect=RuntimeError("simulator down")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "simulator down"):
+                ops_console.inject_fault("encoder-overload", tasks)
+        self.assertFalse(ops_console._workflow_active)
+        self.assertIsNone(ops_console._active_incident_id)
+        self.assertEqual(len(tasks.tasks), 0)
+
+    def test_health_exposes_current_incident_for_browser_reconnection(self):
+        with ops_console._workflow_lock:
+            ops_console._workflow_active = True
+            ops_console._active_incident_id = "current-incident"
+        with patch.object(
+            ops_console, "simulator_request", return_value={"status": "ok"}
+        ), patch.object(ops_console, "query_health", return_value=0):
+            result = ops_console.console_health()
+        self.assertTrue(result["workflow_active"])
+        self.assertEqual(result["active_incident_id"], "current-incident")
 
     def test_latest_incident_uses_most_recent_firestore_update(self):
         old = incident("old", 20)
