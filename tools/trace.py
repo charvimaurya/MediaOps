@@ -18,7 +18,7 @@ def _time(value: datetime) -> str:
 
 def _inferred_events(incident: Incident) -> list[LifecycleEvent]:
     """Reconstruct a best-effort chronology for pre-observability incidents."""
-    events = [LifecycleEvent(timestamp=incident.anomaly.detected_at, component="detector",
+    events = [LifecycleEvent(timestamp=incident.anomaly.detected_at, component="infra_health_monitor",
                              step="detect", outcome="detected", status="DETECTED",
                              detail=incident.anomaly.reason)]
     artifacts = (

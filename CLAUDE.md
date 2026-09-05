@@ -84,7 +84,7 @@ detect → record → orchestrate → [vision ‖ infra] → aggregate → retri
        → decide → safety gate → execute → verify → fallback? → report → close
 ```
 
-- **Detector** — polls Prometheus health; threshold + persistence + dedup → one AnomalyEvent.
+- **Infra Health Monitor** — continuously polls Prometheus health; threshold + persistence + dedup → one AnomalyEvent.
 - **Incident Recorder** — durable Firestore write; one active incident per problem.
 - **Orchestrator** — plain function calling steps in order, persisting state to Firestore.
   (Built early with FAKE stub steps to test flow, then stubs swapped for real one at a time.)

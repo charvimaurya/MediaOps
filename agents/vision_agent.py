@@ -51,7 +51,7 @@ from observability import log_event
 logger = logging.getLogger("vision_agent")
 
 # --------------------------------------------------------------------------- #
-# Config -- module constants, os.environ with defaults (matches detector.py)
+# Config -- module constants, os.environ with defaults (matches infra_health_monitor.py)
 # --------------------------------------------------------------------------- #
 
 try:  # pragma: no cover - convenience only

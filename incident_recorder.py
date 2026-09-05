@@ -39,7 +39,7 @@ from observability import record_event
 logger = logging.getLogger("incident_recorder")
 
 # --------------------------------------------------------------------------- #
-# Config -- inline os.environ, matching detector.py's style
+# Config -- inline os.environ, matching infra_health_monitor.py's style
 # --------------------------------------------------------------------------- #
 
 # Best-effort .env load so a local `.env` "just works"; harmless if absent.
@@ -97,7 +97,7 @@ class IncidentRecorder:
             return existing.incident_id
 
         incident = Incident(anomaly=event, current_step="record")
-        record_event(incident, "detector", "detect", "incident_recorded",
+        record_event(incident, "infra_health_monitor", "detect", "incident_recorded",
                      status=IncidentStatus.DETECTED, detail=event.reason)
         self._create(incident)
         logger.info("created incident %s for anomaly %s", incident.incident_id, event.event_id)

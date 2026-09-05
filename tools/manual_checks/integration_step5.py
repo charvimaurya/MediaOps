@@ -4,7 +4,7 @@ End-to-end integration test for Steps 1-7.
 Runs the REAL components as one chain against the live simulator, live Firestore,
 Grafana MCP, and real Gemini calls:
 
-    simulator fault -> Detector -> AnomalyEvent -> Incident Recorder (Firestore)
+    simulator fault -> Infra Health Monitor -> AnomalyEvent -> Incident Recorder (Firestore)
                     -> Orchestrator
                          -> REAL Vision Agent (Gemini)  ||  REAL Infra Agent (Gemini via Grafana MCP)
                          -> REAL Aggregator (deterministic gate)
@@ -33,7 +33,7 @@ from google.cloud import firestore
 from agents import infra_agent
 import orchestrator
 from agents import vision_agent
-from detector import PROMETHEUS_URL, Detector, query_health
+from infra_health_monitor import PROMETHEUS_URL, InfraHealthMonitor, query_health
 from incident_recorder import FIRESTORE_DATABASE_ID, GCP_PROJECT_ID, IncidentRecorder
 from models import FaultClass, IncidentStatus, InfraFinding, VisionFinding, VisionSymptom
 
@@ -44,7 +44,7 @@ POLL_INTERVAL = 2.0
 DETECT_TIMEOUT = 120
 TEST_COLLECTION = f"incidents_integration_{int(time.time())}"
 
-for name in ("detector", "vision_agent", "infra_agent", "incident_recorder", "orchestrator"):
+for name in ("infra_health_monitor", "vision_agent", "infra_agent", "incident_recorder", "orchestrator"):
     logging.getLogger(name).setLevel(logging.INFO)
 logging.basicConfig(level=logging.WARNING, format="   %(name)s | %(message)s")
 
@@ -97,11 +97,11 @@ def main() -> None:
     print("   'overload' (blocky) section of the messy video.")
 
     # ---- STAGE 2 ---------------------------------------------------- #
-    banner(2, "Detector picks it up and emits exactly one AnomalyEvent")
+    banner(2, "Infra Health Monitor picks it up and emits exactly one AnomalyEvent")
     print(f"   (persistence window {PERSISTENCE_WINDOW:.0f}s, poll {POLL_INTERVAL:.0f}s -- "
           f"default window is 15s)")
     events: list = []
-    det = Detector(
+    det = InfraHealthMonitor(
         events.append,
         prometheus_url=PROMETHEUS_URL,
         persistence_window_seconds=PERSISTENCE_WINDOW,

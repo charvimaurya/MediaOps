@@ -1,5 +1,5 @@
 """
-The Detector -- deterministic front door of the MediaOps CoPilot workflow.
+The Infra Health Monitor -- deterministic front door of the MediaOps CoPilot workflow.
 
 It polls Prometheus for `media_pipeline_health` (1 = healthy, 0 = broken) every
 few seconds. When health stays 0 for a sustained window it emits exactly ONE
@@ -12,7 +12,7 @@ For now the emitted event is only printed. Step 3 will replace the callback.
 
 Run it:
 
-    python3 detector.py
+    python3 infra_health_monitor.py
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from typing import Callable, Optional
 
 from models import AnomalyEvent, FaultClass, Severity
 
-logger = logging.getLogger("detector")
+logger = logging.getLogger("infra_health_monitor")
 
 # --------------------------------------------------------------------------- #
 # Config -- module constants, matching the repo's style
@@ -70,7 +70,7 @@ def _query_instant(base_url: str, promql: str) -> Optional[float]:
     """
     Run one Prometheus instant query. Return the first series' value as a float,
     or None on ANY problem (connection refused, timeout, bad JSON, query error,
-    metric absent). Never raises -- the detector loop must not die on a blip.
+    metric absent). Never raises -- the health-monitor loop must not die on a blip.
     """
     url = f"{base_url.rstrip('/')}/api/v1/query?" + urllib.parse.urlencode({"query": promql})
     try:
@@ -133,10 +133,10 @@ def print_anomaly(event: AnomalyEvent) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# The Detector
+# The Infra Health Monitor
 # --------------------------------------------------------------------------- #
 
-class Detector:
+class InfraHealthMonitor:
     """
     Polls health, applies a persistence window, deduplicates, emits one
     AnomalyEvent per problem.
@@ -234,7 +234,7 @@ class Detector:
 
     def run_forever(self) -> None:
         logger.info(
-            "Detector polling %s for %s every %.0fs (persistence window %.0fs)",
+            "Infra Health Monitor polling %s for %s every %.0fs (persistence window %.0fs)",
             self._base_url, HEALTH_METRIC, self._poll_interval, self._window,
         )
         try:
@@ -248,10 +248,10 @@ class Detector:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    # Running the Detector standalone should produce a real, durable incident --
+    # Running the Infra Health Monitor standalone should produce a real, durable incident --
     # not just a printout. Wire the emitted event straight into the Incident
     # Recorder (which dedups against any existing active incident for the same
-    # fault). Imported here so `import detector` stays free of Firestore.
+    # fault). Imported here so `import infra_health_monitor` stays free of Firestore.
     from incident_recorder import IncidentRecorder
     from observability import log_event
 
@@ -260,7 +260,7 @@ if __name__ == "__main__":
     def _record_and_print(event: AnomalyEvent) -> None:
         print_anomaly(event)
         incident_id = _recorder.record(event)
-        log_event("detector", incident_id, "detect", "incident_recorded", detail=event.reason)
+        log_event("infra_health_monitor", incident_id, "detect", "incident_recorded", detail=event.reason)
         print(f">>> recorded to Firestore: incident {incident_id}\n")
 
-    Detector(on_anomaly=_record_and_print).run_forever()
+    InfraHealthMonitor(on_anomaly=_record_and_print).run_forever()

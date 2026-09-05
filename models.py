@@ -3,7 +3,7 @@ Pydantic data contracts for the MediaOps CoPilot incident-response workflow.
 
 These are the shapes every component hands to the next one:
 
-    Detector           -> AnomalyEvent
+    Infra Health Monitor -> AnomalyEvent
     Incident Recorder  -> Incident            (authoritative Firestore state)
     Vision Agent        -> VisionFinding
     Infra Agent         -> InfraFinding
@@ -172,12 +172,12 @@ class LifecycleEvent(StrictModel):
 
 
 # --------------------------------------------------------------------------- #
-# 1. AnomalyEvent -- output of the Detector
+# 1. AnomalyEvent -- output of the Infra Health Monitor
 # --------------------------------------------------------------------------- #
 
 class AnomalyEvent(StrictModel):
     """
-    One confirmed anomaly. The Detector emits exactly one of these after its
+    One confirmed anomaly. The Infra Health Monitor emits exactly one of these after its
     threshold + persistence + dedup logic fires.
     """
 

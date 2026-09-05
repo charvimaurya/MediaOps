@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
-from detector import PROMETHEUS_URL, query_health, query_raw_snapshot
+from infra_health_monitor import PROMETHEUS_URL, query_health, query_raw_snapshot
 from incident_recorder import IncidentRecorder
 from observability import log_event
 from models import (

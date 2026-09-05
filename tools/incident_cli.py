@@ -48,7 +48,7 @@ def load_incident(incident_id: str) -> tuple[IncidentRecorder, Incident]:
         return rec, rec.load(incident_id)
     except KeyError:
         sys.exit(f"ERROR: no incident {incident_id!r} in Firestore "
-                 f"(collection {rec._col.id!r}). Run the Detector first.")
+                 f"(collection {rec._col.id!r}). Run the Infra Health Monitor first.")
 
 
 def run_step(

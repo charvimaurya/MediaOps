@@ -2,7 +2,7 @@
 
 The browser never receives Firestore credentials and has no operational
 authority. This server reads Firestore/Prometheus, proxies four predefined
-simulator controls, and starts the existing Detector -> Orchestrator workflow.
+simulator controls, and starts the existing Infra Health Monitor -> Orchestrator workflow.
 
 Run with: uvicorn web.ops_console:app --port 8081
 """
@@ -22,7 +22,12 @@ from pathlib import Path
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 
-from detector import Detector, PROMETHEUS_URL, query_health, query_raw_snapshot
+from infra_health_monitor import (
+    InfraHealthMonitor,
+    PROMETHEUS_URL,
+    query_health,
+    query_raw_snapshot,
+)
 from incident_recorder import IncidentRecorder
 from models import Incident, IncidentStatus, TERMINAL_STATUSES, VerificationVerdict
 from observability import log_event
@@ -164,12 +169,12 @@ def _detect_and_orchestrate(workflow_claimed: bool = False) -> None:
                 _active_incident_id = incident_id
             log_event("ops_console", incident_id, "trigger_workflow", "detected")
 
-        detector = Detector(on_anomaly=record)
+        health_monitor = InfraHealthMonitor(on_anomaly=record)
         deadline = time.monotonic() + CONSOLE_DETECTION_TIMEOUT_SECONDS
         while incident_id is None and time.monotonic() < deadline:
-            detector.poll_once()
+            health_monitor.poll_once()
             if incident_id is None:
-                time.sleep(detector._poll_interval)
+                time.sleep(health_monitor._poll_interval)
         if incident_id is None:
             logger.error("console-triggered workflow timed out waiting for unhealthy metrics")
             return
@@ -225,7 +230,7 @@ def inject_fault(fault: str, background_tasks: BackgroundTasks = None) -> dict:
     if starts_workflow:
         # Reserve the single workflow slot before touching the simulator. This
         # closes the race where a second fault could be injected while the
-        # first incident was still running, then receive no detector worker.
+        # first incident was still running, then receive no health-monitor worker.
         with _workflow_lock:
             if _workflow_active:
                 raise HTTPException(

@@ -1,8 +1,8 @@
 """
-Offline sanity check for detector.py -- drives the persistence/dedup state
+Offline sanity check for infra_health_monitor.py -- drives the persistence/dedup state
 machine directly by hand, no Prometheus, no threads, no sleeping for real time.
 
-    python3 -m tools.manual_checks.detector
+    python3 -m tools.manual_checks.infra_health_monitor
 
 Covers: emit-once after the window, dedup while broken, reset on health=1,
 re-emit for a fresh problem, and that a None reading neither emits nor resets.
@@ -10,7 +10,7 @@ re-emit for a fresh problem, and that a None reading neither emits nor resets.
 
 import time
 
-from detector import Detector
+from infra_health_monitor import InfraHealthMonitor
 from models import AnomalyEvent
 
 emitted: list[AnomalyEvent] = []
@@ -20,11 +20,11 @@ def sink(event: AnomalyEvent) -> None:
     emitted.append(event)
 
 
-def fresh() -> Detector:
+def fresh() -> InfraHealthMonitor:
     emitted.clear()
     # tiny window so a couple of hand-fed polls cross it; snapshot query will
     # just come back empty if Prometheus isn't running -- that's fine here.
-    return Detector(sink, persistence_window_seconds=0.05)
+    return InfraHealthMonitor(sink, persistence_window_seconds=0.05)
 
 
 print("1. Emits exactly one AnomalyEvent after the window, then dedups")

@@ -30,8 +30,8 @@ flowchart TD
     User[Operator / Ops Console] -->|Inject fault| Simulator[Simulator + FFmpeg]
     Simulator -->|media_* telemetry| Prometheus[Prometheus]
     Prometheus --> Grafana[Grafana dashboard]
-    Prometheus --> Detector[Detector]
-    Detector -->|Create incident| Firestore[(Firestore)]
+    Prometheus --> HealthMonitor[Infra Health Monitor]
+    HealthMonitor -->|Create incident| Firestore[(Firestore)]
 
     Firestore --> Orchestrator[Orchestrator]
     Orchestrator --> Vision[Vision Agent<br/>video evidence]
@@ -84,8 +84,8 @@ workflow transition is durably recorded in Firestore.
 │ :8000/:8001  │                       │ read-only telemetry
 └──────▲───────┘                       ▼
        │ predefined control      ┌──────────┐
-       │ endpoints               │ Detector │
-       │                         └────┬─────┘
+       │ endpoints          │ Infra Health Monitor │
+       │                    └─────────┬─────────────┘
        │                              ▼
        │                         incident record
        │                              │
@@ -180,7 +180,7 @@ Telemetry unavailability is never interpreted as health. Verification does not c
 ```text
 .
 ├── models.py                  strict Pydantic contracts and enums
-├── detector.py                Prometheus persistence detector
+├── infra_health_monitor.py    deterministic Prometheus health monitoring
 ├── incident_recorder.py       Firestore incident persistence and dedup
 ├── orchestrator.py            full lifecycle coordinator
 ├── aggregator.py              deterministic dual-domain corroboration
@@ -225,7 +225,7 @@ Important fields include:
 |---|---|
 | `status`, `current_step` | current durable workflow position |
 | `lifecycle_events` | ordered component/step/outcome timeline |
-| `anomaly` | detector evidence and telemetry snapshot |
+| `anomaly` | Infra Health Monitor evidence and telemetry snapshot |
 | `vision`, `infra` | independent AI findings |
 | `evidence` | deterministic aggregation and agreement |
 | `precedent` | retrieved KB matches and similarity |
@@ -453,7 +453,7 @@ curl -X POST http://localhost:8001/failure/encoder-crash
 curl -X POST http://localhost:8001/failure/network-degradation
 ```
 
-Allow roughly one telemetry update, one Prometheus scrape, and the 15-second detector persistence window. A normal detection commonly takes 15–25 seconds after injection.
+Allow roughly one telemetry update, one Prometheus scrape, and the Infra Health Monitor's 15-second persistence window. A normal detection commonly takes 15–25 seconds after injection.
 
 The reset endpoint is for returning a demo environment to baseline, not for proving automated recovery:
 
@@ -603,7 +603,7 @@ Infra may return low-confidence `unknown` for transitional metric windows. The c
 
 ### Step 1 takes time
 
-The delay is deliberate: simulator telemetry updates every five seconds, Prometheus scrapes every five seconds, the detector polls every three seconds, and health must stay at zero for 15 seconds. The console displays “Monitoring stream” while confirming persistence.
+The delay is deliberate: simulator telemetry updates every five seconds, Prometheus scrapes every five seconds, the Infra Health Monitor polls every three seconds, and health must stay at zero for 15 seconds. The console displays “Monitoring stream” while confirming persistence.
 
 ### Grafana iframe is blank
 

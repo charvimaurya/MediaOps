@@ -65,7 +65,7 @@ detect -> record -> orchestrate -> [vision || infra] -> aggregate -> retrieve(RA
        -> decide -> safety gate -> execute -> verify -> fallback? -> report -> close
 ```
 
-- Detector: polls Prometheus health; threshold + persistence + dedup -> one AnomalyEvent.
+- Infra Health Monitor: polls Prometheus health; threshold + persistence + dedup -> one AnomalyEvent.
 - Incident Recorder: durable Firestore write; one active incident per problem; mints incident_id.
 - Orchestrator: plain function; takes an existing incident_id and drives it through states. Built with fake stubs first, then stubs swapped for real one at a time.
 - Vision Agent: Gemini reads a frame from the matching messy-video section -> VisionFinding.
@@ -108,6 +108,6 @@ Python, Pydantic (contracts + validation), Google ADK (agent framework), Gemini 
 
 ## Current build state
 
-Built and tested (real, integrated): Steps 1–9 — data contracts, detector, incident recorder, orchestrator skeleton, vision agent, infra agent, aggregator, knowledge base + RAG, remediation agent. Components are runnable standalone against an incident_id, reading inputs from and writing outputs to the incident's Firestore doc.
+Built and tested (real, integrated): Steps 1–9 — data contracts, Infra Health Monitor, incident recorder, orchestrator skeleton, vision agent, infra agent, aggregator, knowledge base + RAG, remediation agent. Components are runnable standalone against an incident_id, reading inputs from and writing outputs to the incident's Firestore doc.
 
 Next: Safety Gate (Step 10), Control Plane (Step 11), Verify Recovery (Step 12), then fallback/report/KB-writeback, full orchestrator wiring, UI, deploy.
