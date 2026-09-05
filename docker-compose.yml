@@ -28,8 +28,15 @@ services:
     depends_on:
       - prometheus
 
+    environment:
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+
     volumes:
       - grafana-storage:/var/lib/grafana
+      - ./web/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./web/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
 
 volumes:

@@ -1,6 +1,20 @@
+# Local secrets and credentials. The Grafana dashboard is explicitly safe.
 *.json
-output/
+!web/grafana/dashboards/*.json
 .env
 .env.*
 !.env.example
+
+# Generated Python and environment files.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Generated runtime media/output. Recreate the Vision evidence video with
+# `python3 simulator/generate_messy_video.py` after cloning.
+output/
+
+# Local logs and operating-system metadata.
+*.log
 .DS_Store

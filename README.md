@@ -346,7 +346,19 @@ python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 ```
 
-### 2. Start the simulator
+### 2. Generate the Vision evidence video
+
+The source video is committed, while the derived evidence video is generated
+locally and intentionally excluded from Git. Generate it once after cloning:
+
+```bash
+python3 simulator/generate_messy_video.py
+```
+
+This creates `simulator/output/messy_video.mov`, which the Vision Agent and ops
+console use for healthy, overload, RGB-shift, and encoder-failure evidence.
+
+### 3. Start the simulator
 
 Terminal 1:
 
@@ -371,7 +383,7 @@ curl http://localhost:8001/state
 curl http://localhost:8000/metrics | grep '^media_'
 ```
 
-### 3. Start Prometheus and Grafana
+### 4. Start Prometheus and Grafana
 
 Terminal 2:
 
@@ -396,7 +408,7 @@ curl -G http://localhost:9090/api/v1/query \
   --data-urlencode 'query=media_pipeline_health'
 ```
 
-### 4. Seed the knowledge base
+### 5. Seed the knowledge base
 
 Run once after Firestore and Vertex AI credentials are ready. The operation is idempotent:
 
@@ -406,7 +418,7 @@ python3 -m tools.seed_knowledge_base
 
 Seed records live in the `knowledge_base` collection and are separate from incident documents.
 
-### 5. Start the operations console
+### 6. Start the operations console
 
 Terminal 3:
 
@@ -429,7 +441,7 @@ The console provides:
 
 Use one console tab during a live run. The page polls the active incident document and stops polling after a terminal result.
 
-### 6. Run a complete incident
+### 7. Run a complete incident
 
 The easiest path is to select a fault in the console. It injects the real simulator fault, waits for sustained detection, creates the incident, and invokes the real orchestrator automatically.
 
@@ -551,6 +563,13 @@ python3 -m unittest tests.test_ops_console -v
 
 Tests use fakes/mocks where appropriate and do not require destructive simulator changes. Live end-to-end validation additionally requires the simulator, Prometheus/Grafana, Firestore, and Google credentials.
 
+The real-Firestore CLI integration check is intentionally separate from unit
+test discovery:
+
+```bash
+python3 -m tools.manual_incident_cli_check
+```
+
 ## Evaluation
 
 The golden scenarios cover encoder overload, encoder failure, RGB shift, network degradation, and a healthy baseline. AI-agent evaluations use separate Gemini calls; deterministic guardrail and verification cases use controlled inputs and live telemetry where required.
@@ -637,3 +656,7 @@ Stop the stale owning process before restarting the corresponding service. Never
 - Never bypass idempotency, action budgets, cooldowns, or compatibility policy.
 - Never write an unverified outcome as a successful KB precedent.
 - Never expose Firestore, Slack, Grafana service-account, or Google credentials to browser JavaScript or Gemini.
+
+## License
+
+MediaOps CoPilot is available under the [MIT License](LICENSE).

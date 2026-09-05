@@ -44,6 +44,7 @@ from google.adk.models import Gemini
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
+from external_calls import AI_HTTP_OPTIONS, ExternalCallTimeout, is_timeout_error
 from models import Incident, VisionFinding, VisionSymptom
 from observability import log_event
 
@@ -188,6 +189,7 @@ def _build_agent(instruction: str) -> LlmAgent:
                 "vertexai": True,
                 "project": GCP_PROJECT_ID,
                 "location": VERTEX_LOCATION,
+                "http_options": AI_HTTP_OPTIONS,
             },
         ),
         instruction=instruction,
@@ -251,7 +253,17 @@ def analyze_frame(
 
         instruction = _INSTRUCTION
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            raw = _call_gemini(frames, instruction)
+            try:
+                raw = _call_gemini(frames, instruction)
+            except Exception as exc:
+                if not is_timeout_error(exc):
+                    raise
+                logger.warning("vision%s attempt %d timed out", ctx, attempt)
+                if attempt == MAX_ATTEMPTS:
+                    raise ExternalCallTimeout(
+                        "Vision Gemini request timed out twice"
+                    ) from exc
+                continue
             try:
                 parsed = _VisionResponse.model_validate_json(raw)
             except (ValidationError, ValueError) as exc:

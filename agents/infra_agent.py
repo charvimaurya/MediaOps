@@ -55,6 +55,7 @@ from google.genai import types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from external_calls import AI_HTTP_OPTIONS, ExternalCallTimeout, is_timeout_error
 from models import FaultClass, Incident, InfraFinding
 from observability import log_event
 
@@ -361,6 +362,7 @@ def _build_agent(instruction: str) -> LlmAgent:
                 "vertexai": True,
                 "project": GCP_PROJECT_ID,
                 "location": VERTEX_LOCATION,
+                "http_options": AI_HTTP_OPTIONS,
             },
         ),
         instruction=instruction,
@@ -451,7 +453,17 @@ def analyze_infra(
 
     instruction = _INSTRUCTION
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        raw = _call_gemini(summary, instruction)
+        try:
+            raw = _call_gemini(summary, instruction)
+        except Exception as exc:
+            if not is_timeout_error(exc):
+                raise
+            logger.warning("infra%s attempt %d timed out", ctx, attempt)
+            if attempt == MAX_ATTEMPTS:
+                raise ExternalCallTimeout(
+                    "Infra Gemini request timed out twice"
+                ) from exc
+            continue
         try:
             parsed = _InfraResponse.model_validate_json(raw)
         except (ValidationError, ValueError) as exc:

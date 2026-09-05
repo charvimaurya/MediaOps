@@ -31,12 +31,13 @@ import logging
 import math
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from google import genai
 from google.cloud import firestore
 from google.genai import types
 
+from external_calls import AI_HTTP_OPTIONS, ExternalCallTimeout, is_timeout_error
 from models import IncidentEvidence, KBMatch, RemediationAction
 from observability import log_event
 
@@ -74,9 +75,28 @@ def _genai() -> genai.Client:
     global _client
     if _client is None:
         _client = genai.Client(
-            vertexai=True, project=GCP_PROJECT_ID, location=VERTEX_LOCATION
+            vertexai=True,
+            project=GCP_PROJECT_ID,
+            location=VERTEX_LOCATION,
+            http_options=AI_HTTP_OPTIONS,
         )
     return _client
+
+
+def _embedding_request(operation: Callable[[], Any]) -> Any:
+    """Run one embedding request with one timeout-only retry."""
+    for attempt in range(1, 3):
+        try:
+            return operation()
+        except Exception as exc:
+            if not is_timeout_error(exc):
+                raise
+            logger.warning("Vertex embedding attempt %d timed out", attempt)
+            if attempt == 2:
+                raise ExternalCallTimeout(
+                    "Vertex embedding request timed out twice"
+                ) from exc
+    raise AssertionError("unreachable")
 
 
 # --------------------------------------------------------------------------- #
@@ -89,19 +109,23 @@ def _embed(text: str, *, task_type: str) -> list[float]:
     seeding, 'RETRIEVAL_QUERY' when retrieving. Returns a 768-float, L2-normalised,
     deterministic vector. This is the single seam a test monkey-patches.
     """
-    resp = _genai().models.embed_content(
-        model=EMBED_MODEL,
-        contents=text,
-        config=types.EmbedContentConfig(task_type=task_type),
+    resp = _embedding_request(
+        lambda: _genai().models.embed_content(
+            model=EMBED_MODEL,
+            contents=text,
+            config=types.EmbedContentConfig(task_type=task_type),
+        )
     )
     return list(resp.embeddings[0].values)
 
 
 def _embed_many(texts: list[str], *, task_type: str) -> list[list[float]]:
-    resp = _genai().models.embed_content(
-        model=EMBED_MODEL,
-        contents=texts,
-        config=types.EmbedContentConfig(task_type=task_type),
+    resp = _embedding_request(
+        lambda: _genai().models.embed_content(
+            model=EMBED_MODEL,
+            contents=texts,
+            config=types.EmbedContentConfig(task_type=task_type),
+        )
     )
     return [list(e.values) for e in resp.embeddings]
 
@@ -121,20 +145,20 @@ def _cosine(a: list[float], b: list[float]) -> float:
 # Part A -- seeding
 # --------------------------------------------------------------------------- #
 
-# Summaries are written in aggregator._build_summary()'s style so their embeddings
-# land near a real IncidentEvidence.summary for the same fault.
+# Seed summaries retain the fault, observable evidence, outcome, and action. They
+# intentionally avoid fabricated confidence scores and recovery durations.
 SEED_RECORDS: list[dict] = [
     {
         "kb_id": "kb-0001",
         "fault_class": "encoder_overload",
         "action_taken": "RESTART_ENCODER",
         "outcome": "resolved",
-        "recovery_seconds": 45.0,
         "summary": (
-            "encoder_overload on encoder_01. Infra (conf 0.95): media_cpu_usage_percent 97.0, "
-            "media_fps 18.0, media_encoding_latency_ms 190.0. Vision (conf 0.95): MACROBLOCKING "
-            "-- heavy blocky compression artifacts across the whole frame. Video symptom "
-            "corroborates the telemetry fault class. Resolved by RESTART_ENCODER in 45s."
+            "encoder_overload on encoder_01. Infrastructure evidence showed high "
+            "media_cpu_usage_percent, reduced media_fps, and increased "
+            "media_encoding_latency_ms. Vision observed MACROBLOCKING with heavy blocky "
+            "artifacts across the whole frame. The findings corroborated each other. "
+            "Resolved by RESTART_ENCODER."
         ),
     },
     {
@@ -142,12 +166,11 @@ SEED_RECORDS: list[dict] = [
         "fault_class": "encoder_overload",
         "action_taken": "REDUCE_PROFILE",
         "outcome": "resolved",
-        "recovery_seconds": 30.0,
         "summary": (
-            "encoder_overload on encoder_01. Infra (conf 0.9): media_cpu_usage_percent 94.0, "
-            "media_fps 21.0, media_encoding_latency_ms 165.0. Vision (conf 0.85): MACROBLOCKING "
-            "-- moderate blockiness and smearing on motion. Video symptom corroborates the "
-            "telemetry fault class. Resolved by REDUCE_PROFILE (lower bitrate) in 30s."
+            "encoder_overload on encoder_01. Infrastructure evidence showed high "
+            "media_cpu_usage_percent, reduced media_fps, and increased "
+            "media_encoding_latency_ms. Vision observed MACROBLOCKING and smearing during "
+            "motion. The findings corroborated each other. Resolved by REDUCE_PROFILE."
         ),
     },
     {
@@ -155,12 +178,11 @@ SEED_RECORDS: list[dict] = [
         "fault_class": "encoder_failure",
         "action_taken": "RESTART_ENCODER",
         "outcome": "resolved",
-        "recovery_seconds": 52.0,
         "summary": (
-            "encoder_failure on encoder_01. Infra (conf 0.97): media_encoder_status 0.0, "
-            "media_fps 0.0, media_bitrate_mbps 0.0, media_dropped_frames_percent 100.0. Vision "
-            "(conf 1.0): BLACK_FRAME -- screen entirely black, no picture. Video symptom "
-            "corroborates the telemetry fault class. Resolved by RESTART_ENCODER in 52s."
+            "encoder_failure on encoder_01. Infrastructure evidence showed "
+            "media_encoder_status stopped, with media_fps and media_bitrate_mbps at zero and "
+            "all frames dropped. Vision observed BLACK_FRAME with no picture. The findings "
+            "corroborated each other. Resolved by RESTART_ENCODER."
         ),
     },
     {
@@ -168,12 +190,11 @@ SEED_RECORDS: list[dict] = [
         "fault_class": "encoder_failure",
         "action_taken": "SWITCH_SOURCE",
         "outcome": "resolved",
-        "recovery_seconds": 70.0,
         "summary": (
-            "encoder_failure on encoder_01. Infra (conf 0.95): media_encoder_status 0.0, "
-            "media_fps 0.0, media_dropped_frames_percent 100.0. Vision (conf 1.0): BLACK_FRAME "
-            "-- black output, stream down. RESTART_ENCODER did not bring the encoder back; "
-            "resolved by SWITCH_SOURCE to the backup encoder in 70s."
+            "encoder_failure on encoder_01. Infrastructure evidence showed "
+            "media_encoder_status stopped, media_fps at zero, and all frames dropped. Vision "
+            "observed BLACK_FRAME and black output. RESTART_ENCODER did not restore the stream; "
+            "resolved by SWITCH_SOURCE to the backup encoder."
         ),
     },
     {
@@ -181,13 +202,11 @@ SEED_RECORDS: list[dict] = [
         "fault_class": "rgb_shift",
         "action_taken": "RESTART_ENCODER",
         "outcome": "resolved",
-        "recovery_seconds": 40.0,
         "summary": (
-            "rgb_shift on encoder_01. Infra (conf 0.4): media_pipeline_health 0.0, telemetry "
-            "otherwise nominal. Vision (conf 0.95): RGB_SHIFT -- persistent red and cyan colour "
-            "fringing and channel misregistration on every edge. Video symptom carries no "
-            "telemetry signature; not corroborated by infra. Resolved by RESTART_ENCODER "
-            "(re-aligned the colour channels) in 40s."
+            "rgb_shift on encoder_01. Infrastructure telemetry was otherwise nominal. Vision "
+            "observed RGB_SHIFT with persistent red and cyan fringing and channel "
+            "misregistration. The video symptom had no matching telemetry signature. Resolved "
+            "by RESTART_ENCODER, which realigned the colour channels."
         ),
     },
     {
@@ -195,12 +214,11 @@ SEED_RECORDS: list[dict] = [
         "fault_class": "rgb_shift",
         "action_taken": "SWITCH_SOURCE",
         "outcome": "not_resolved",
-        "recovery_seconds": 0.0,
         "summary": (
-            "rgb_shift on encoder_01. Infra (conf 0.3): telemetry nominal, media_pipeline_health "
-            "flapping. Vision (conf 0.9): RGB_SHIFT -- red and blue channels offset from green, "
-            "chromatic aberration throughout the frame. SWITCH_SOURCE did not clear the shift; "
-            "incident escalated to a human, not resolved."
+            "rgb_shift on encoder_01. Infrastructure telemetry was mostly nominal while "
+            "media_pipeline_health fluctuated. Vision observed RGB_SHIFT with red and blue "
+            "channels offset from green. SWITCH_SOURCE did not clear the shift; the incident "
+            "escalated and was not resolved."
         ),
     },
 ]

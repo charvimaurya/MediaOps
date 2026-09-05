@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import os
-import sys
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import safety_gate
@@ -241,8 +242,24 @@ class SafetyGateTests(unittest.TestCase):
         self.assertNotEqual(first.idempotency_key, third.idempotency_key)
 
     def test_no_ai_modules_are_imported(self) -> None:
-        self.assertNotIn("google.adk", sys.modules)
-        self.assertNotIn("google.genai", sys.modules)
+        # Inspect Safety Gate's own imports. Global sys.modules is unsuitable:
+        # earlier agent tests legitimately import ADK into the same test process.
+        tree = ast.parse(Path(safety_gate.__file__).read_text(encoding="utf-8"))
+        imports = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        imports.update(
+            node.module or ""
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        )
+        self.assertFalse(
+            any(name.startswith(("google.adk", "google.genai")) for name in imports),
+            imports,
+        )
 
     def test_standalone_runner_persists_gating_and_decision(self) -> None:
         incident = make_incident()

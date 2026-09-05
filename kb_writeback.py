@@ -48,10 +48,13 @@ def build_precedent(incident: Incident) -> dict:
         raise KBWritebackError("no successful execution matches the verified action")
 
     target = incident.evidence.infra.affected_component
+    symptom = incident.evidence.vision.symptom.value.replace("_", " ").lower()
+    fault = incident.evidence.fault_class.value.replace("_", " ")
     summary = (
-        f"{incident.evidence.summary} Verified RECOVERED after "
-        f"{verification.action.value} on {target}; telemetry stayed healthy for "
-        f"{verification.stable_window_seconds:.1f}s and video was normal."
+        f"{fault.capitalize()} on {target}. Vision observed {symptom}: "
+        f"{incident.evidence.vision.description}. Infrastructure analysis identified "
+        f"{fault}. The findings corroborated each other. Resolved by "
+        f"{verification.action.value}; telemetry and video independently verified healthy."
     )
     kb_id = f"incident-{incident.incident_id}"
     return {
@@ -62,12 +65,10 @@ def build_precedent(incident: Incident) -> dict:
         "target": target,
         "outcome": "resolved",
         "summary": summary,
-        "evidence_summary": incident.evidence.summary,
         "verification_summary": {
             "verdict": verification.verdict.value,
             "telemetry_ok": verification.telemetry_ok,
             "video_ok": verification.video_ok,
-            "stable_window_seconds": verification.stable_window_seconds,
         },
         "verified_at": verification.verified_at.isoformat(),
         "written_at": datetime.now(timezone.utc).isoformat(),

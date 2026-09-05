@@ -62,6 +62,10 @@ class KBWritebackTests(unittest.TestCase):
         self.assertEqual(written["outcome"], "resolved")
         self.assertEqual(written["action_taken"], incident.execution.action.value)
         self.assertEqual(written["embedding_task_type"], "RETRIEVAL_DOCUMENT")
+        self.assertNotIn("evidence_summary", written)
+        self.assertNotIn("stable_window_seconds", written["verification_summary"])
+        self.assertNotIn("confidence", written["summary"].lower())
+        self.assertNotIn("conf ", written["summary"].lower())
         self.assertEqual(recorder.incident.kb_writeback_id, written["kb_id"])
 
     def test_failed_verification_never_embeds_or_writes(self):
