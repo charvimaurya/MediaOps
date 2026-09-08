@@ -10,7 +10,7 @@
       "id": 1,
       "interval": "5s",
       "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "min_over_time(media_pipeline_health[1m])", "legendFormat": "Health", "refId": "A"}],
+      "targets": [{"expr": "media_pipeline_health", "legendFormat": "Health", "refId": "A"}],
       "title": "Pipeline Health",
       "type": "timeseries"
     },
@@ -21,7 +21,7 @@
       "id": 2,
       "interval": "5s",
       "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "min_over_time(media_fps[1m])", "legendFormat": "FPS", "refId": "A"}],
+      "targets": [{"expr": "media_fps", "legendFormat": "FPS", "refId": "A"}],
       "title": "Frames per second",
       "type": "timeseries"
     },
@@ -32,7 +32,7 @@
       "id": 3,
       "interval": "5s",
       "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "max_over_time(media_cpu_usage_percent[1m])", "legendFormat": "CPU", "refId": "A"}],
+      "targets": [{"expr": "media_cpu_usage_percent", "legendFormat": "CPU", "refId": "A"}],
       "title": "Encoder CPU",
       "type": "timeseries"
     },
@@ -43,7 +43,7 @@
       "id": 4,
       "interval": "5s",
       "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "max_over_time(media_packet_loss_percent[1m])", "legendFormat": "Packet loss", "refId": "A"}],
+      "targets": [{"expr": "media_packet_loss_percent", "legendFormat": "Packet loss", "refId": "A"}],
       "title": "Packet loss",
       "type": "timeseries"
     }
