@@ -17,7 +17,7 @@ from typing import Callable, Iterable
 
 from pydantic import ValidationError
 
-from incident_recorder import INCIDENTS_COLLECTION, IncidentRecorder
+from incident_recorder import IncidentRecorder
 from models import TERMINAL_STATUSES, Incident, IncidentStatus
 
 

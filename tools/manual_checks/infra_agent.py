@@ -11,8 +11,6 @@ and the strict structured-output guardrail (bad JSON / bad enum -> one retry ->
 None; a retry that recovers; an infra failure raises rather than returning None).
 """
 
-import json
-import os
 from datetime import datetime, timedelta, timezone
 
 from agents import infra_agent

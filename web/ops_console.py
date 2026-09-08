@@ -43,7 +43,11 @@ GRAFANA_EMBED_URL = os.environ.get(
     "GRAFANA_EMBED_URL",
     "http://localhost:3000/d/mediaops/mediaops?orgId=1&refresh=5s&theme=dark&kiosk",
 )
+GRAFANA_EMBED_ENABLED = os.environ.get("GRAFANA_EMBED_ENABLED", "true").lower() in {
+    "1", "true", "yes", "on",
+}
 PAGE = Path(__file__).parent / "static" / "index.html"
+PITCH_DECK = Path(__file__).parent / "static" / "MediaOps_CoPilot.pdf"
 EVIDENCE_VIDEO = Path(__file__).parents[1] / "simulator" / "output" / "messy_video.mov"
 
 FAULT_ENDPOINTS = {
@@ -192,6 +196,17 @@ def index() -> FileResponse:
     return FileResponse(PAGE)
 
 
+@app.get("/MediaOps_CoPilot.pdf", include_in_schema=False)
+def pitch_deck() -> FileResponse:
+    """Serve the public product deck without exposing any backend credentials."""
+    return FileResponse(
+        PITCH_DECK,
+        media_type="application/pdf",
+        filename="MediaOps_CoPilot.pdf",
+        content_disposition_type="inline",
+    )
+
+
 @app.get("/api/health")
 def console_health() -> dict:
     simulator = simulator_request("/health")
@@ -217,7 +232,12 @@ def read_metrics() -> dict:
 
 @app.get("/api/config")
 def read_public_config() -> dict:
-    return {"grafana_embed_url": GRAFANA_EMBED_URL}
+    return {
+        "grafana_embed_enabled": GRAFANA_EMBED_ENABLED,
+        # The same public URL becomes a safe external link when Grafana Cloud's
+        # frame policy forbids embedding. It never contains Grafana credentials.
+        "grafana_embed_url": GRAFANA_EMBED_URL,
+    }
 
 
 @app.post("/api/fault/{fault}")

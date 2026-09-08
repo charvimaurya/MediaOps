@@ -79,18 +79,34 @@ def infra(_incident):
 
 
 class Harness:
-    def __init__(self, verify_verdict=VerificationVerdict.RECOVERED, gate_allow=True):
+    def __init__(
+        self,
+        verify_verdict=VerificationVerdict.RECOVERED,
+        gate_allow=True,
+        *,
+        gate_verdicts=None,
+        repeat_blocked_action=False,
+    ):
         self.recorder = Recorder(incident())
         self.calls = []
         self.verify_verdict = verify_verdict
         self.gate_allow = gate_allow
+        self.gate_verdicts = list(gate_verdicts or [])
+        self.repeat_blocked_action = repeat_blocked_action
 
-    def remediate(self, evidence, precedent):
+    def remediate(
+        self, evidence, precedent, *, rejected_action=None, block_reason=None
+    ):
         self.calls.append("remediate")
+        action = RemediationAction.RESTART_ENCODER
+        rationale = "restart"
+        if rejected_action is not None and not self.repeat_blocked_action:
+            action = RemediationAction.REDUCE_PROFILE
+            rationale = f"alternate after gate rejection: {block_reason}"
         return RemediationProposal(
             incident_id=evidence.incident_id,
-            action=RemediationAction.RESTART_ENCODER,
-            rationale="restart",
+            action=action,
+            rationale=rationale,
             confidence=0.95,
             model="real-seam",
         )
@@ -98,14 +114,18 @@ class Harness:
     def gate(self, incident_id):
         self.calls.append("gate")
         inc = self.recorder.load(incident_id)
-        verdict = SafetyVerdict.ALLOW if self.gate_allow else SafetyVerdict.BLOCK
+        if self.gate_verdicts:
+            verdict = self.gate_verdicts.pop(0)
+        else:
+            verdict = SafetyVerdict.ALLOW if self.gate_allow else SafetyVerdict.BLOCK
+        allowed = verdict is SafetyVerdict.ALLOW
         decision = SafetyDecision(
             incident_id=incident_id,
             action=inc.proposal.action,
             verdict=verdict,
-            checks=[SafetyCheck(name="policy", passed=self.gate_allow)],
-            block_reason=None if self.gate_allow else "policy: blocked",
-            idempotency_key="key-1",
+            checks=[SafetyCheck(name="policy", passed=allowed)],
+            block_reason=None if allowed else "policy: blocked",
+            idempotency_key=f"key-{len([c for c in self.calls if c == 'gate'])}",
         )
         inc.safety_decision = decision
         inc.idempotency_key = decision.idempotency_key
@@ -283,14 +303,40 @@ class OrchestratorTests(unittest.TestCase):
             ["remediate", "gate", "control", "verify", "report", "writeback"],
         )
 
-    def test_gate_block_is_terminal_and_never_executes(self):
+    def test_first_gate_block_can_repropose_once_then_execute(self):
+        h = Harness(
+            gate_verdicts=[SafetyVerdict.BLOCK, SafetyVerdict.ALLOW]
+        )
+        final = h.orchestrator().run(h.recorder.incident.incident_id)
+        self.assertEqual(final.status, IncidentStatus.CLOSED)
+        self.assertEqual(
+            h.calls,
+            [
+                "remediate", "gate", "remediate", "gate", "control",
+                "verify", "report", "writeback",
+            ],
+        )
+        self.assertEqual(final.execution.action, RemediationAction.REDUCE_PROFILE)
+        self.assertEqual(len(final.proposal_history), 1)
+        self.assertEqual(len(final.safety_decision_history), 1)
+
+    def test_second_gate_block_is_terminal_and_never_executes(self):
         h = Harness(gate_allow=False)
         final = h.orchestrator().run(h.recorder.incident.incident_id)
         self.assertEqual(final.status, IncidentStatus.BLOCKED)
-        self.assertEqual(h.calls, ["remediate", "gate"])
+        self.assertEqual(h.calls, ["remediate", "gate", "remediate", "gate", "report"])
         self.assertIsNone(final.execution)
-        self.assertEqual(final.terminal_step, "gate")
-        self.assertIn("policy: blocked", final.terminal_reason)
+        self.assertEqual(final.terminal_step, "gate_retry")
+        self.assertIn("Replacement proposal blocked", final.terminal_reason)
+        self.assertTrue(final.report_sent)
+
+    def test_repeated_blocked_action_stops_before_second_gate(self):
+        h = Harness(gate_allow=False, repeat_blocked_action=True)
+        final = h.orchestrator().run(h.recorder.incident.incident_id)
+        self.assertEqual(final.status, IncidentStatus.BLOCKED)
+        self.assertEqual(h.calls, ["remediate", "gate", "remediate", "report"])
+        self.assertIsNone(final.execution)
+        self.assertIn("repeated blocked action", final.terminal_reason)
 
     def test_cannot_verify_stops_before_reporting(self):
         h = Harness(verify_verdict=VerificationVerdict.CANNOT_VERIFY)

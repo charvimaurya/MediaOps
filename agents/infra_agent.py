@@ -95,6 +95,9 @@ MCP_GRAFANA_ARGS = os.environ.get(
 
 # prometheus_http branch (fallback)
 PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
+SIMULATOR_CONTROL_URL = os.environ.get(
+    "SIMULATOR_CONTROL_URL", "http://localhost:8001"
+).rstrip("/")
 
 # the read-only, bounded allow-list -- no arbitrary PromQL is ever built
 INFRA_METRICS = [
@@ -523,7 +526,9 @@ if __name__ == "__main__":
 
     fault_arg = args[0] if args else None
     if fault_arg:
-        req = urllib.request.Request(f"http://localhost:8001/failure/{fault_arg}", method="POST")
+        req = urllib.request.Request(
+            f"{SIMULATOR_CONTROL_URL}/failure/{fault_arg}", method="POST"
+        )
         with urllib.request.urlopen(req, timeout=5) as r:
             print(">>> injected:", r.read().decode())
         print("    waiting 15s for the fault to reach Prometheus...")
@@ -538,6 +543,8 @@ if __name__ == "__main__":
             print(finding.model_dump_json(indent=2))
     finally:
         if fault_arg:
-            req = urllib.request.Request("http://localhost:8001/recovery/reset", method="POST")
+            req = urllib.request.Request(
+                f"{SIMULATOR_CONTROL_URL}/recovery/reset", method="POST"
+            )
             with urllib.request.urlopen(req, timeout=5) as r:
                 print("\n>>> reset:", r.read().decode())

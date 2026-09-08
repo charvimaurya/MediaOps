@@ -5,21 +5,23 @@
   "panels": [
     {
       "datasource": {"type": "prometheus", "uid": "mediaops-prometheus"},
-      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "max": 1, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "unit": "short"}, "overrides": []},
       "gridPos": {"h": 8, "w": 5, "x": 0, "y": 0},
       "id": 1,
-      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
-      "targets": [{"expr": "media_pipeline_health", "refId": "A"}],
+      "interval": "5s",
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{"expr": "min_over_time(media_pipeline_health[1m])", "legendFormat": "Health", "refId": "A"}],
       "title": "Pipeline Health",
-      "type": "stat"
+      "type": "timeseries"
     },
     {
       "datasource": {"type": "prometheus", "uid": "mediaops-prometheus"},
       "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": []},
       "gridPos": {"h": 8, "w": 7, "x": 5, "y": 0},
       "id": 2,
+      "interval": "5s",
       "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "media_fps", "legendFormat": "FPS", "refId": "A"}],
+      "targets": [{"expr": "min_over_time(media_fps[1m])", "legendFormat": "FPS", "refId": "A"}],
       "title": "Frames per second",
       "type": "timeseries"
     },
@@ -28,8 +30,9 @@
       "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "percent"}, "overrides": []},
       "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
       "id": 3,
+      "interval": "5s",
       "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "media_cpu_usage_percent", "legendFormat": "CPU", "refId": "A"}],
+      "targets": [{"expr": "max_over_time(media_cpu_usage_percent[1m])", "legendFormat": "CPU", "refId": "A"}],
       "title": "Encoder CPU",
       "type": "timeseries"
     },
@@ -38,8 +41,9 @@
       "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 12, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "percent"}, "overrides": []},
       "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
       "id": 4,
+      "interval": "5s",
       "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "media_packet_loss_percent", "legendFormat": "Packet loss", "refId": "A"}],
+      "targets": [{"expr": "max_over_time(media_packet_loss_percent[1m])", "legendFormat": "Packet loss", "refId": "A"}],
       "title": "Packet loss",
       "type": "timeseries"
     }
@@ -48,6 +52,7 @@
   "schemaVersion": 39,
   "tags": ["mediaops"],
   "time": {"from": "now-15m", "to": "now"},
+  "timepicker": {"refresh_intervals": ["5s", "10s", "30s", "1m", "5m"]},
   "timezone": "browser",
   "title": "MediaOps",
   "uid": "mediaops",

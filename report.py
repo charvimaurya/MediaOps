@@ -27,7 +27,11 @@ class ReportError(RuntimeError):
 
 def build_message(incident: Incident) -> str:
     """Create a factual summary without making or authorising any decision."""
-    if incident.verification is None and incident.automation_failure_reason is None:
+    if (
+        incident.verification is None
+        and incident.automation_failure_reason is None
+        and incident.terminal_reason is None
+    ):
         raise ReportError("incident has no final verification or automation outcome")
     fault = (
         incident.evidence.fault_class.value
@@ -40,6 +44,8 @@ def build_message(incident: Incident) -> str:
         actions = [incident.execution.action.value]
     if incident.automation_failure_reason:
         verdict = f"AUTOMATION_FAILED — {incident.automation_failure_reason}"
+    elif incident.terminal_reason:
+        verdict = f"{incident.status.value} — {incident.terminal_reason}"
     else:
         verdict = incident.verification.verdict.value
     return (

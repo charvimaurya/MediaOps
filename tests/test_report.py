@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 import report
-from models import VerificationResult, VerificationVerdict
+from models import IncidentStatus, VerificationResult, VerificationVerdict
 from tests.test_safety_gate import make_incident
 
 
@@ -20,6 +20,15 @@ class Recorder:
 
 
 class ReportTests(unittest.TestCase):
+    def test_blocked_terminal_reason_can_be_reported(self):
+        incident = make_incident()
+        incident.status = IncidentStatus.BLOCKED
+        incident.terminal_step = "gate_retry"
+        incident.terminal_reason = "Replacement proposal blocked: compatibility"
+        message = report.build_message(incident)
+        self.assertIn("BLOCKED", message)
+        self.assertIn("compatibility", message)
+
     def test_slack_sender_uses_certifi_verified_tls_context(self):
         class Response:
             status = 200

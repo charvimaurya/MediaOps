@@ -21,7 +21,7 @@ from simulator import pipeline as real_pipeline
 from simulator import backup as backup_module
 from simulator.failures import compute_telemetry_fields
 from simulator.telemetry import update_metrics
-from agent.metrics import ACTIVE_ENCODER
+from shared_metrics.metrics import ACTIVE_ENCODER
 
 logger = logging.getLogger(__name__)
 

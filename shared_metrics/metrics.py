@@ -1,9 +1,8 @@
 """
-New Prometheus metrics for the Master Agent (section K), registered
-against the same global default registry used throughout this project.
-Exposed via this component's own HTTP server, same pattern as
-infra_health_monitor.py (see that module's docstring for why a separate port
-is used instead of the simulator's existing :8000 endpoint).
+Prometheus metrics shared by simulator control and output-accounting code.
+
+They use the project's global default registry so the existing metrics HTTP
+server exposes them without any additional wiring.
 """
 
 from prometheus_client import Counter, Gauge, Histogram

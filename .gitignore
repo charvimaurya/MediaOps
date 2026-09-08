@@ -5,11 +5,26 @@
 .env.*
 !.env.example
 
+# Local AI-assistant instructions; keep these workspace-only.
+/AGENTS.md
+/CLAUDE.md
+
 # Generated Python and environment files.
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
+
+# Local editor metadata and swap files.
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # Generated runtime media/output. Recreate the Vision evidence video with
 # `python3 simulator/generate_messy_video.py` after cloning.

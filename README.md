@@ -42,7 +42,9 @@ flowchart TD
     Knowledge --> Remediation[Remediation Agent]
     Remediation -->|Fixed enum proposal| Gate{Deterministic<br/>Safety Gate}
 
-    Gate -->|BLOCK| SafeStop[Safe terminal state]
+    Gate -->|First BLOCK| Repropose[One bounded different proposal]
+    Repropose --> Gate
+    Gate -->|Second BLOCK| SafeStop[BLOCKED: safe terminal state]
     Gate -->|ALLOW only| Control[Idempotent Control Plane]
     Control -->|Narrow control endpoint| Simulator
     Control --> Verify[Verify Recovery<br/>video + sustained metrics]
@@ -193,6 +195,7 @@ Telemetry unavailability is never interpreted as health. Verification does not c
 ├── kb_writeback.py            verified-success precedent writeback
 ├── pdf_report.py              downloadable incident PDF generation
 ├── observability.py           consistent structured lifecycle logging
+├── shared_metrics/            shared Prometheus metrics used by simulator controls
 ├── agents/
 │   ├── vision_agent.py        Gemini video symptom classification
 │   ├── infra_agent.py         Gemini telemetry fault classification
@@ -207,8 +210,10 @@ Telemetry unavailability is never interpreted as health. Verification does not c
 │   ├── seed_knowledge_base.py seeded verified precedents
 │   └── incident_cli.py        shared standalone-step runner
 ├── simulator/                 FFmpeg workload, telemetry, faults, controls
-├── prometheus/                Prometheus scrape configuration
+├── prometheus/                local and Cloud Run Prometheus configuration
+├── cloud/start.sh             supervised single-container cloud startup
 ├── tests/                     unit and integration tests
+├── Dockerfile                 production Cloud Run image
 ├── docker-compose.yml         Prometheus and Grafana
 └── requirements.txt           Python dependencies
 ```
@@ -303,6 +308,27 @@ For local development without MCP, the deterministic Prometheus HTTP reader is a
 export INFRA_METRICS_SOURCE="prometheus_http"
 export PROMETHEUS_URL="http://localhost:9090"
 ```
+
+### Hosted Grafana Cloud
+
+The Cloud Run container scrapes the simulator through its local Prometheus and can
+forward only `media_*` metrics to Grafana Cloud using Prometheus `remote_write`.
+Configure these non-secret deployment values:
+
+```bash
+GRAFANA_REMOTE_WRITE_URL=https://prometheus-prod-XX.grafana.net/api/prom/push
+GRAFANA_METRICS_USERNAME=your-metrics-instance-id
+GRAFANA_CLOUD_TOKEN_FILE=/var/secrets/grafana/token
+```
+
+Store the Grafana access-policy token in Google Secret Manager with only the
+`metrics:write` scope, then mount it at the configured token-file path. Never place
+that token in the image or expose it through the browser.
+
+Set `GRAFANA_EMBED_URL` to an externally shared dashboard URL. If the Grafana stack
+permits framing, `GRAFANA_EMBED_ENABLED=true` loads it inline. Grafana Cloud stacks
+that return `frame-ancestors 'none'` must keep embedding disabled; the console then
+shows a prominent link to the same unauthenticated shared dashboard.
 
 ### Slack
 
@@ -605,7 +631,7 @@ Infra may return low-confidence `unknown` for transitional metric windows. The c
 
 The delay is deliberate: simulator telemetry updates every five seconds, Prometheus scrapes every five seconds, the Infra Health Monitor polls every three seconds, and health must stay at zero for 15 seconds. The console displays “Monitoring stream” while confirming persistence.
 
-### Grafana iframe is blank
+### Local Grafana iframe is blank
 
 The Compose configuration already sets:
 
@@ -628,6 +654,12 @@ http://localhost:3000/d/mediaops/mediaops?orgId=1&refresh=5s&theme=dark&kiosk
 ```
 
 Override it with `GRAFANA_EMBED_URL` when necessary.
+
+For Grafana Cloud, first inspect the shared dashboard response headers. If its
+Content Security Policy contains `frame-ancestors 'none'`, browsers will correctly
+refuse the iframe. Set `GRAFANA_EMBED_ENABLED=false`; the console will display the
+public dashboard as an external Grafana card instead. Do not weaken browser security
+or proxy authenticated Grafana content through the application.
 
 ### Infra Agent cannot start Grafana MCP
 

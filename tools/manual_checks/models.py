@@ -8,8 +8,6 @@ from the repo root:
 (2) tries to build a VisionFinding from garbage and shows the validation error
 """
 
-from datetime import datetime, timezone
-
 from pydantic import ValidationError
 
 from models import (

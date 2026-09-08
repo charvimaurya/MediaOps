@@ -115,7 +115,7 @@ class Orchestrator:
         vision_runner: Callable[..., VisionFinding | None] = analyze_frame,
         infra_runner: Callable[[Incident], InfraFinding | None] = analyze_infra,
         retrieve_runner: Callable[[object], list] = retrieve,
-        remediation_runner: Callable[[object, list], object] = propose_remediation,
+        remediation_runner: Callable[..., object] = propose_remediation,
         gate_runner: Callable[[str], SafetyDecision] | None = None,
         control_runner: Callable[[str], ExecutionResult] | None = None,
         verify_runner: Callable[[str], VerificationResult] | None = None,
@@ -236,12 +236,79 @@ class Orchestrator:
                          action=decision.action, detail=decision.block_reason or "all checks passed")
             self._recorder.save(incident)
             if decision.verdict is not SafetyVerdict.ALLOW:
-                return self._terminal(
-                    incident,
-                    IncidentStatus.BLOCKED,
-                    "gate",
-                    decision.block_reason or "Safety Gate blocked without a reason",
+                first_block_reason = (
+                    decision.block_reason or "Safety Gate blocked without a reason"
                 )
+                # A rejected AI suggestion gets one bounded chance to be replaced.
+                # Both attempts remain auditable, and the replacement has no
+                # authority until the unchanged deterministic gate approves it.
+                incident.proposal_history.append(incident.proposal)
+                incident.safety_decision_history.append(decision)
+                incident.safety_decision = None
+                incident.idempotency_key = None
+                incident.current_step = "repropose"
+                incident.notes.append(
+                    "initial proposal blocked; requesting one different proposal"
+                )
+                record_event(
+                    incident,
+                    "orchestrator",
+                    "repropose",
+                    "started",
+                    action=decision.action,
+                    detail=first_block_reason,
+                )
+                self._recorder.save(incident)
+
+                replacement = self._remediate(
+                    incident.evidence,
+                    incident.precedent,
+                    rejected_action=decision.action,
+                    block_reason=first_block_reason,
+                )
+                if replacement is None:
+                    return self._blocked_and_report(
+                        incident,
+                        "Remediation Agent returned no valid replacement after "
+                        f"initial block: {first_block_reason}",
+                    )
+                if replacement.action is decision.action:
+                    return self._blocked_and_report(
+                        incident,
+                        "Replacement proposal repeated blocked action "
+                        f"{replacement.action.value}; initial block: {first_block_reason}",
+                    )
+
+                incident.proposal = replacement
+                record_event(
+                    incident,
+                    "remediation",
+                    "repropose",
+                    "completed",
+                    action=replacement.action,
+                    detail=replacement.rationale,
+                )
+                self._recorder.save(incident)
+
+                self._enter(incident, IncidentStatus.GATING, "gate_retry")
+                decision = self._gate(incident_id)
+                incident = self._recorder.load(incident_id)
+                record_event(
+                    incident,
+                    "safety_gate",
+                    "gate_retry",
+                    decision.verdict.value.lower(),
+                    action=decision.action,
+                    detail=decision.block_reason or "all checks passed",
+                )
+                self._recorder.save(incident)
+                if decision.verdict is not SafetyVerdict.ALLOW:
+                    return self._blocked_and_report(
+                        incident,
+                        "Replacement proposal blocked: "
+                        f"{decision.block_reason or 'Safety Gate gave no reason'}",
+                        step="gate_retry",
+                    )
 
             self._enter(incident, IncidentStatus.EXECUTING, "execute")
             execution = self._control(incident_id)
@@ -379,6 +446,37 @@ class Orchestrator:
         record_event(incident, "orchestrator", step, status.value.lower(), status=status, detail=reason)
         self._recorder.save(incident)
         print(f"-> {status.value}: {reason}")
+        return incident
+
+    def _blocked_and_report(
+        self, incident: Incident, reason: str, *, step: str = "gate"
+    ) -> Incident:
+        """End safely as BLOCKED and best-effort report it for human review."""
+        incident = self._terminal(incident, IncidentStatus.BLOCKED, step, reason)
+        try:
+            self._report(incident.incident_id)
+            incident = self._recorder.load(incident.incident_id)
+            record_event(
+                incident,
+                "report",
+                "report",
+                "sent" if incident.report_sent else "not_sent",
+                detail=incident.report_error or "blocked incident report sent",
+            )
+            self._recorder.save(incident)
+        except Exception as exc:
+            # Reporting has no operational authority. Its failure is recorded,
+            # but must never turn a safely blocked incident into FAILED.
+            incident = self._recorder.load(incident.incident_id)
+            incident.report_error = f"{type(exc).__name__}: {exc}"
+            record_event(
+                incident,
+                "report",
+                "report",
+                "failed",
+                detail=incident.report_error,
+            )
+            self._recorder.save(incident)
         return incident
 
     def _fail_closed(self, incident: Incident, exc: Exception) -> None:

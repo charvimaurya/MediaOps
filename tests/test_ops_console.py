@@ -82,11 +82,25 @@ class OpsConsoleTests(unittest.TestCase):
         self.assertIn("function showLanding()", page)
         self.assertIn("button.onclick=showWelcome", page)
         self.assertIn("See it in action — choose a fault to simulate:", page)
+        self.assertIn('href="/MediaOps_CoPilot.pdf"', page)
+        self.assertIn("Please see the presentation here to learn more about Media Copilot, E2E strategy &amp; implementation.", page)
+        landing = page.split('id="landingView"', 1)[1].split('id="welcomeView"', 1)[0]
+        welcome = page.split('id="welcomeView"', 1)[1].split('id="workflowView"', 1)[0]
+        self.assertLess(landing.index("Please see the presentation here"), landing.index("Try it now"))
+        self.assertNotIn("Please see the presentation here", welcome)
         self.assertIn("before viewers notice", page)
         self.assertIn('id="workflowView"', page)
         self.assertIn('class="split"', page)
         self.assertIn("Back / try another error", page)
         self.assertIn("if(box)box.innerHTML", page)
+
+    def test_pitch_deck_is_served_as_an_inline_pdf(self):
+        response = ops_console.pitch_deck()
+
+        self.assertTrue(ops_console.PITCH_DECK.is_file())
+        self.assertEqual(response.media_type, "application/pdf")
+        self.assertEqual(response.path, ops_console.PITCH_DECK)
+        self.assertIn("inline", response.headers["content-disposition"])
 
     def test_workflow_uses_one_current_card_with_subtle_progress(self):
         page = ops_console.PAGE.read_text()
@@ -189,6 +203,10 @@ class OpsConsoleTests(unittest.TestCase):
         self.assertIn("await api('/api/config')", page)
         self.assertIn("config.grafana_embed_url", page)
         self.assertIn("selectEvidenceTab('metrics')", page)
+        self.assertIn('id="grafanaFallback"', page)
+        self.assertIn('id="grafanaExternalLink"', page)
+        self.assertIn('Open live Grafana dashboard', page)
+        self.assertIn("if(config.grafana_embed_enabled)", page)
 
     def test_each_button_maps_only_to_predefined_simulator_endpoint(self):
         expected = {

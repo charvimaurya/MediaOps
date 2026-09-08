@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from typing import List
 
-from agent.metrics import SEGMENTS_EXPECTED_TOTAL, SEGMENTS_WRITTEN_TOTAL
+from shared_metrics.metrics import SEGMENTS_EXPECTED_TOTAL, SEGMENTS_WRITTEN_TOTAL
 
 SEGMENT_DURATION_SECONDS = 2.0
 

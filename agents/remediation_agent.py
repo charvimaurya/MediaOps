@@ -238,10 +238,22 @@ def _call_gemini(context: str, instruction: str) -> str:
 def propose_remediation(
     evidence: IncidentEvidence,
     precedent: list[KBMatch],
+    *,
+    rejected_action: RemediationAction | None = None,
+    block_reason: str | None = None,
 ) -> Optional[RemediationProposal]:
     """See module docstring for the contract. Proposes ONE action; never executes."""
     ctx = f" (incident {evidence.incident_id})"
     context = _build_context(evidence, precedent)
+    if rejected_action is not None:
+        context += (
+            "\n\nPRIOR SAFETY-GATE REJECTION\n"
+            f"  rejected_action: {rejected_action.value}\n"
+            f"  reason: {block_reason or 'unspecified'}\n"
+            "This is the single permitted re-proposal. Choose a DIFFERENT action "
+            "from the fixed enum that addresses the rejection. If no different "
+            "action is justified, the workflow will stop safely."
+        )
     logger.info(
         "remediation%s: fault=%s  agreement=%s  precedent=%d",
         ctx, evidence.fault_class.value, evidence.agreement, len(precedent),
