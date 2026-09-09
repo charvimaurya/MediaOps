@@ -8,6 +8,10 @@ The project is built around one rule:
 
 Gemini can observe, classify, and propose. It cannot approve an action, execute a fix, or declare recovery. Those responsibilities belong to deterministic Python components with explicit, testable rules.
 
+## Pitch deck
+
+[View the MediaOps CoPilot pitch deck](web/static/MediaOps_CoPilot.pdf) for the product overview, end-to-end strategy, architecture, and implementation.
+
 ## What the system demonstrates
 
 - A real FFmpeg media workload driven by a source MP4.
