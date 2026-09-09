@@ -8,6 +8,7 @@
 # Local AI-assistant instructions; keep these workspace-only.
 /AGENTS.md
 /CLAUDE.md
+/docs/
 
 # Generated Python and environment files.
 __pycache__/
